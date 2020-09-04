@@ -204,6 +204,32 @@ let package = Package(
             path: "Tests/BalancingBucketQueueTests"
         ),
         .target(
+            // MARK: BucketPayloads
+            name: "BucketPayloads",
+            dependencies: [
+                "BuildArtifacts",
+                "DI",
+                "DateProvider",
+                "DeveloperDirLocator",
+                "DeveloperDirModels",
+                "FileSystem",
+                "LocalHostDeterminer",
+                "Logging",
+                "PluginManager",
+                "PluginSupport",
+                "QueueModels",
+                "ResourceLocationResolver",
+                "Runner",
+                "RunnerModels",
+                "SimulatorPool",
+                "SimulatorPoolModels",
+                "TemporaryStuff",
+                "Types",
+                "WorkerCapabilitiesModels",
+            ],
+            path: "Sources/BucketPayloads"
+        ),
+        .target(
             // MARK: BucketQueue
             name: "BucketQueue",
             dependencies: [
@@ -1211,6 +1237,7 @@ let package = Package(
             name: "QueueModels",
             dependencies: [
                 "BuildArtifacts",
+                "DI",
                 "DeveloperDirModels",
                 "PluginSupport",
                 "RunnerModels",
@@ -1225,6 +1252,7 @@ let package = Package(
             // MARK: QueueModelsTestHelpers
             name: "QueueModelsTestHelpers",
             dependencies: [
+                "BucketPayloads",
                 "BuildArtifacts",
                 "BuildArtifactsTestHelpers",
                 "DeveloperDirModels",
@@ -1653,6 +1681,7 @@ let package = Package(
             // MARK: ScheduleStrategy
             name: "ScheduleStrategy",
             dependencies: [
+                "BucketPayloads",
                 "BuildArtifacts",
                 "DeveloperDirModels",
                 "Logging",

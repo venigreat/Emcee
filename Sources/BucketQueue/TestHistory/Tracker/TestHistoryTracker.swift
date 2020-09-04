@@ -1,3 +1,4 @@
+import BucketPayloads
 import QueueModels
 
 public protocol TestHistoryTracker {
@@ -9,7 +10,8 @@ public protocol TestHistoryTracker {
     
     func accept(
         testingResult: TestingResult,
-        bucket: Bucket,
+        bucketId: BucketId,
+        payload: RunTestsBucketPayload,
         workerId: WorkerId
     ) throws -> TestHistoryTrackerAcceptResult
 }

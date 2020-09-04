@@ -12,7 +12,7 @@ public struct StuckBucket: Equatable {
             case .workerIsSilent:
                 return "worker is silent"
             case .bucketLost:
-                return "worker has been processing bucket but then switched to another bucket"
+                return "worker has been processing bucket but then stopped without providing bucket result"
             }
         }
     }

@@ -4,7 +4,7 @@ import QueueModels
 public protocol BucketResultAccepter {
     func accept(
         bucketId: BucketId,
-        testingResult: TestingResult,
+        bucketResult: BucketResult,
         workerId: WorkerId
     ) throws -> BucketQueueAcceptResult
 }

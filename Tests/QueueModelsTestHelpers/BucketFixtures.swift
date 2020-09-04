@@ -1,3 +1,4 @@
+import BucketPayloads
 import BuildArtifacts
 import BuildArtifactsTestHelpers
 import Foundation
@@ -16,18 +17,21 @@ public final class BucketFixtures {
     ) -> Bucket {
         return Bucket(
             bucketId: bucketId,
-            buildArtifacts: BuildArtifactsFixtures.fakeEmptyBuildArtifacts(),
-            developerDir: .current,
-            pluginLocations: [],
-            simulatorControlTool: SimulatorControlToolFixtures.fakeFbsimctlTool,
-            simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
-            simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
-            testDestination: TestDestinationFixtures.testDestination,
-            testEntries: testEntries,
-            testExecutionBehavior: TestExecutionBehavior(environment: [:], numberOfRetries: numberOfRetries),
-            testRunnerTool: TestRunnerToolFixtures.fakeFbxctestTool,
-            testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
-            testType: TestType.uiTest,
+            bucketPayload: RunTestsBucketPayload(
+                buildArtifacts: BuildArtifactsFixtures.fakeEmptyBuildArtifacts(),
+                developerDir: .current,
+                pluginLocations: [],
+                simulatorControlTool: SimulatorControlToolFixtures.fakeFbsimctlTool,
+                simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
+                simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
+                testDestination: TestDestinationFixtures.testDestination,
+                testEntries: testEntries,
+                testExecutionBehavior: TestExecutionBehavior(environment: [:], numberOfRetries: numberOfRetries),
+                testRunnerTool: TestRunnerToolFixtures.fakeFbxctestTool,
+                testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0,
+                testRunnerMaximumSilenceDuration: 0),
+                testType: TestType.uiTest
+            ),
             workerCapabilityRequirements: workerCapabilityRequirements
         )
     }

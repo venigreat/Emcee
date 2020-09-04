@@ -1,3 +1,4 @@
+import BucketPayloads
 import Foundation
 import Logging
 import QueueModels
@@ -46,18 +47,20 @@ public class BucketSplitter: Splitter, CustomStringConvertible {
             guard let entry = group.first else { return nil }
             return Bucket(
                 bucketId: BucketId(value: uniqueIdentifierGenerator.generate()),
-                buildArtifacts: entry.buildArtifacts,
-                developerDir: entry.developerDir,
-                pluginLocations: entry.pluginLocations,
-                simulatorControlTool: entry.simulatorControlTool,
-                simulatorOperationTimeouts: entry.simulatorOperationTimeouts,
-                simulatorSettings: entry.simulatorSettings,
-                testDestination: entry.testDestination,
-                testEntries: group.map { $0.testEntry },
-                testExecutionBehavior: entry.testExecutionBehavior,
-                testRunnerTool: entry.testRunnerTool,
-                testTimeoutConfiguration: entry.testTimeoutConfiguration,
-                testType: entry.testType,
+                bucketPayload: RunTestsBucketPayload(
+                    buildArtifacts: entry.buildArtifacts,
+                    developerDir: entry.developerDir,
+                    pluginLocations: entry.pluginLocations,
+                    simulatorControlTool: entry.simulatorControlTool,
+                    simulatorOperationTimeouts: entry.simulatorOperationTimeouts,
+                    simulatorSettings: entry.simulatorSettings,
+                    testDestination: entry.testDestination,
+                    testEntries: group.map { $0.testEntry },
+                    testExecutionBehavior: entry.testExecutionBehavior,
+                    testRunnerTool: entry.testRunnerTool,
+                    testTimeoutConfiguration: entry.testTimeoutConfiguration,
+                    testType: entry.testType
+                ),
                 workerCapabilityRequirements: entry.workerCapabilityRequirements
             )
         }

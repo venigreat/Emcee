@@ -1,3 +1,4 @@
+import BucketPayloads
 import DateProvider
 import Dispatch
 import Foundation
@@ -64,16 +65,21 @@ final class BucketQueueImpl: BucketQueue {
 
     private var runningQueueState_onSyncQueue: RunningQueueState {
         var dequeuedTests = MapWithCollection<WorkerId, TestName>()
+        var enqueuedTests = [TestName]()
+        
         for dequeuedBucket in dequeuedBuckets {
-            dequeuedTests.append(
-                key: dequeuedBucket.workerId,
-                elements: dequeuedBucket.enqueuedBucket.bucket.testEntries.map { $0.testName }
-            )
+            if let runTestsBucketPayload = dequeuedBucket.enqueuedBucket.bucket.bucketPayload as? RunTestsBucketPayload {
+                dequeuedTests.append(
+                    key: dequeuedBucket.workerId,
+                    elements: runTestsBucketPayload.testEntries.map { $0.testName }
+                )
+                enqueuedTests.append(contentsOf: runTestsBucketPayload.testEntries.map { $0.testName })
+            }
         }
         
         return RunningQueueState(
             enqueuedBucketCount: enqueuedBuckets.count,
-            enqueuedTests: enqueuedBuckets.flatMap { $0.bucket.testEntries.map { $0.testName } },
+            enqueuedTests: enqueuedTests,
             dequeuedBucketCount: dequeuedBuckets.count,
             dequeuedTests: dequeuedTests
         )
@@ -135,16 +141,18 @@ final class BucketQueueImpl: BucketQueue {
     
     public func accept(
         bucketId: BucketId,
-        testingResult: TestingResult,
+        bucketResult: BucketResult,
         workerId: WorkerId
     ) throws -> BucketQueueAcceptResult {
         return try queue.sync {
-            Logger.debug("Validating result for \(bucketId) from \(workerId): \(testingResult)")
+            Logger.debug("Validating result for \(bucketId) from \(workerId): \(bucketResult)")
             
             guard let dequeuedBucket = previouslyDequeuedBucket_onSyncQueue(bucketId: bucketId, workerId: workerId) else {
                 Logger.verboseDebug("Validation failed: no dequeued bucket for \(bucketId) \(workerId)")
                 throw ResultAcceptanceError.noDequeuedBucket(bucketId: bucketId, workerId: workerId)
             }
+            
+            
             
             let actualTestEntries = Set(testingResult.unfilteredResults.map { $0.testEntry })
             let expectedTestEntries = Set(dequeuedBucket.enqueuedBucket.bucket.testEntries)
@@ -203,21 +211,29 @@ final class BucketQueueImpl: BucketQueue {
             
             // Every stucked test produces a single bucket with itself
             let buckets = stuckBuckets.flatMap { stuckBucket in
-                stuckBucket.bucket.testEntries.map { testEntry in
+                if let runTestsBucketPayload = stuckBucket.bucket.bucketPayload as? RunTestsBucketPayload {
+                    runTestsBucketPayload.testEntries.map { testEntry in
+                        Bucket(
+                            bucketId: BucketId(value: uniqueIdentifierGenerator.generate()),
+                            buildArtifacts: stuckBucket.bucket.buildArtifacts,
+                            developerDir: stuckBucket.bucket.developerDir,
+                            pluginLocations: stuckBucket.bucket.pluginLocations,
+                            simulatorControlTool: stuckBucket.bucket.simulatorControlTool,
+                            simulatorOperationTimeouts: stuckBucket.bucket.simulatorOperationTimeouts,
+                            simulatorSettings: stuckBucket.bucket.simulatorSettings,
+                            testDestination: stuckBucket.bucket.testDestination,
+                            testEntries: [testEntry],
+                            testExecutionBehavior: stuckBucket.bucket.testExecutionBehavior,
+                            testRunnerTool: stuckBucket.bucket.testRunnerTool,
+                            testTimeoutConfiguration: stuckBucket.bucket.testTimeoutConfiguration,
+                            testType: stuckBucket.bucket.testType,
+                            workerCapabilityRequirements: stuckBucket.bucket.workerCapabilityRequirements
+                        )
+                    }
+                } else {
                     Bucket(
                         bucketId: BucketId(value: uniqueIdentifierGenerator.generate()),
-                        buildArtifacts: stuckBucket.bucket.buildArtifacts,
-                        developerDir: stuckBucket.bucket.developerDir,
-                        pluginLocations: stuckBucket.bucket.pluginLocations,
-                        simulatorControlTool: stuckBucket.bucket.simulatorControlTool,
-                        simulatorOperationTimeouts: stuckBucket.bucket.simulatorOperationTimeouts,
-                        simulatorSettings: stuckBucket.bucket.simulatorSettings,
-                        testDestination: stuckBucket.bucket.testDestination,
-                        testEntries: [testEntry],
-                        testExecutionBehavior: stuckBucket.bucket.testExecutionBehavior,
-                        testRunnerTool: stuckBucket.bucket.testRunnerTool,
-                        testTimeoutConfiguration: stuckBucket.bucket.testTimeoutConfiguration,
-                        testType: stuckBucket.bucket.testType,
+                        bucketPayload: stuckBucket.bucket.bucketPayload,
                         workerCapabilityRequirements: stuckBucket.bucket.workerCapabilityRequirements
                     )
                 }
@@ -295,6 +311,12 @@ final class BucketQueueImpl: BucketQueue {
         let lostTestEntries = expectedTestEntries.subtracting(actualTestEntries)
         if !lostTestEntries.isEmpty {
             Logger.debug("Test result for \(bucket.bucketId) from \(workerId) contains lost test entries: \(lostTestEntries)")
+            let lostResult = try testHistoryTracker.accept(
+                testingResult: <#T##TestingResult#>,
+                bucketId: bucket.bucketId,
+                payload: <#T##RunTestsBucketPayload#>,
+                workerId: workerId
+            )
             let lostResult = try testHistoryTracker.accept(
                 testingResult: TestingResult(
                     testDestination: bucket.testDestination,

@@ -31,7 +31,7 @@ import Types
 import UniqueIdentifierGenerator
 import WorkerCapabilities
 
-public final class DistWorker: SchedulerDelegate {
+public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
     private let di: DI
     private let callbackQueue = DispatchQueue(label: "DistWorker.callbackQueue", qos: .default, attributes: .concurrent)
     private let currentlyBeingProcessedBucketsTracker = DefaultCurrentlyBeingProcessedBucketsTracker()
@@ -40,7 +40,7 @@ public final class DistWorker: SchedulerDelegate {
     private let workerId: WorkerId
     private var payloadSignature = Either<PayloadSignature, DistWorkerError>.error(DistWorkerError.missingPayloadSignature)
     
-    private enum ReducedBucketFetchResult: Equatable {
+    private enum ReducedBucketFetchResult {
         case result(SchedulerBucket?)
         case checkAgain(after: TimeInterval)
     }
@@ -112,16 +112,10 @@ public final class DistWorker: SchedulerDelegate {
     private func runTests(
         workerConfiguration: WorkerConfiguration
     ) throws {
-        let schedulerCconfiguration = SchedulerConfiguration(
-            numberOfSimulators: workerConfiguration.numberOfSimulators,
-            schedulerDataSource: DistRunSchedulerDataSource(
-                onNextBucketRequest: fetchNextBucket
-            )
-        )
-        
         let scheduler = Scheduler(
-            configuration: schedulerCconfiguration,
             di: di,
+            numberOfSimulators: workerConfiguration.numberOfSimulators,
+            schedulerDataSource: self,
             schedulerDelegate: self,
             version: version
         )
@@ -159,17 +153,13 @@ public final class DistWorker: SchedulerDelegate {
                 Logger.debug("Received \(fetchedBucket.bucketId)")
                 tracker.willProcess(bucketId: fetchedBucket.bucketId)
                 return .result(
-                    SchedulerBucket.from(
-                        bucket: fetchedBucket,
-                        testExecutionBehavior: TestExecutionBehavior(
-                            environment: fetchedBucket.testExecutionBehavior.environment,
-                            numberOfRetries: 0
-                        )
-                    )
+                    SchedulerBucket.from(bucket: fetchedBucket)
                 )
             }
         }
     }
+    
+    public func nextBucket() -> SchedulerBucket? { fetchNextBucket() }
     
     private func fetchNextBucket() -> SchedulerBucket? {
         while true {

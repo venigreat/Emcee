@@ -1,14 +1,15 @@
+import BucketPayloads
 import QueueModels
 
 public final class TestHistoryTrackerAcceptResult {
-    public let bucketsToReenqueue: [Bucket]
+    public let payloadsToReenqueue: [RunTestsBucketPayload]
     public let testingResult: TestingResult
     
     public init(
-        bucketsToReenqueue: [Bucket],
+        payloadsToReenqueue: [RunTestsBucketPayload],
         testingResult: TestingResult
     ) {
-        self.bucketsToReenqueue = bucketsToReenqueue
+        self.payloadsToReenqueue = payloadsToReenqueue
         self.testingResult = testingResult
     }
 }
