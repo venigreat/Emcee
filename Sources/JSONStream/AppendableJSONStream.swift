@@ -1,11 +1,17 @@
 import Foundation
 
 public protocol AppendableJSONStream: JSONStream {
-    func append(scalars: [Unicode.Scalar])
+    func append(scalars: [UInt8])
 }
 
 public extension AppendableJSONStream {
     func append(data: Data) {
-        append(scalars: data.map { Unicode.Scalar($0) })
+        let bytes = [UInt8](data)
+        append(scalars: bytes)
+    }
+    
+    func append(string: String) {
+        guard let data = string.data(using: .utf8) else { return }
+        append(data: data)
     }
 }

@@ -6,13 +6,13 @@ public final class BlockingArrayBasedJSONStream: AppendableJSONStream {
     private let readLock = NSLock()
     private let writeLock = DispatchSemaphore(value: 0)
     
-    private let storage = AtomicValue<[Unicode.Scalar]>([])
+    private let storage = AtomicValue<[UInt8]>([])
     
     private var willProvideMoreData = true
     
     public init() {}
     
-    public func append(scalars: [Unicode.Scalar]) {
+    public func append(scalars: [UInt8]) {
         storage.withExclusiveAccess {
             $0.insert(contentsOf: scalars.reversed(), at: 0)
         }
@@ -21,11 +21,11 @@ public final class BlockingArrayBasedJSONStream: AppendableJSONStream {
     
     // MARK: - JSONStream
     
-    public func touch() -> Unicode.Scalar? {
+    public func touch() -> UInt8? {
         return lastScalar(delete: false)
     }
     
-    public func read() -> Unicode.Scalar? {
+    public func read() -> UInt8? {
         return lastScalar(delete: true)
     }
     
@@ -34,7 +34,7 @@ public final class BlockingArrayBasedJSONStream: AppendableJSONStream {
         onStreamClose()
     }
     
-    private func lastScalar(delete: Bool) -> Unicode.Scalar? {
+    private func lastScalar(delete: Bool) -> UInt8? {
         readLock.lock()
         defer {
             readLock.unlock()

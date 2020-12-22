@@ -300,9 +300,8 @@ class JSONReaderTests: XCTestCase {
         let reader = JSONReader(inputStream: jsonStream, eventStream: eventStream)
         try reader.start()
         
-        XCTAssertEqual(eventStream.allScalars.count, 1)
-        var string = String()
-        string.unicodeScalars.append(contentsOf: eventStream.allScalars[0])
+        XCTAssertEqual(eventStream.allBytes.count, 1)
+        let string = String(data: Data(eventStream.allBytes[0]), encoding: .utf8)
         XCTAssertEqual(string, "[[\"obj\"]]")
     }
 }

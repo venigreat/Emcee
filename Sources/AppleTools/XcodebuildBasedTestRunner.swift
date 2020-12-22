@@ -8,6 +8,7 @@ import ResourceLocationResolver
 import Runner
 import RunnerModels
 import SimulatorPoolModels
+import SynchronousWaiter
 import TemporaryStuff
 
 public final class XcodebuildBasedTestRunner: TestRunner {
@@ -85,19 +86,56 @@ public final class XcodebuildBasedTestRunner: TestRunner {
             )
         )
         
+        let useResultStream = testContext.environment["EMCEE_USE_RESULT_STREAM"] == "true"
+        
         let xcodebuildOutputProcessor = XcodebuildOutputProcessor(
             testRunnerStream: testRunnerStream,
             xcodebuildLogParser: xcodebuildLogParser
         )
+        let resultStream = ResultStreamImpl(
+            dateProvider: dateProvider,
+            testRunnerStream: testRunnerStream
+        )
+        let updatingFileReader = try UpdatingFileReader(
+            path: resultStreamFile,
+            processControllerProvider: processControllerProvider
+        )
+        var updatingFileReaderHandle: UpdatingFileReaderHandle?
+        
         processController.onStart { sender, _ in
             testRunnerStream.openStream()
+            
+            if useResultStream {
+                do {
+                    updatingFileReaderHandle = try updatingFileReader.read(handler: resultStream.write(data:))
+                } catch {
+                    Logger.error("Failed to read stream file: \(error)")
+                    return sender.terminateAndForceKillIfNeeded()
+                }
+                resultStream.streamContents { error in
+                    if let error = error {
+                        Logger.error("Result stream error: \(error)")
+                    }
+                    testRunnerStream.closeStream()
+                }
+            }
         }
-        processController.onStdout { _, data, _ in
-            xcodebuildOutputProcessor.newStdout(data: data)
+        
+        if !useResultStream {
+            processController.onStdout { _, data, _ in
+                xcodebuildOutputProcessor.newStdout(data: data)
+            }
         }
+        
         processController.onTermination { _, _ in
-            testRunnerStream.closeStream()
+            if useResultStream {
+                updatingFileReaderHandle?.cancel()
+                resultStream.close()
+            } else {
+                testRunnerStream.closeStream()
+            }
         }
+        
         return ProcessControllerWrappingTestRunnerInvocation(
             processController: processController
         )

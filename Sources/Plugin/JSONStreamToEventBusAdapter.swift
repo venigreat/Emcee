@@ -11,24 +11,21 @@ final class JSONStreamToEventBusAdapter: JSONReaderEventStream {
         self.eventBus = eventBus
     }
     
-    func newArray(_ array: NSArray, scalars: [Unicode.Scalar]) {
-        Logger.error("JSON stream reader received an unexpected event: '\(scalars)'")
+    func newArray(_ array: NSArray, bytes: [UInt8]) {
+        let context = String(data: Data(bytes), encoding: .utf8)
+        Logger.error("JSON stream reader received an unexpected event: '\(String(describing: context))'")
     }
     
-    func newObject(_ object: NSDictionary, scalars: [Unicode.Scalar]) {
-        var string = String()
-        string.unicodeScalars.append(contentsOf: scalars)
-        guard let eventData = string.data(using: .utf8) else {
-            Logger.warning("Failed to convert JSON string to data: '\(string)'")
-            return
-        }
+    func newObject(_ object: NSDictionary, bytes: [UInt8]) {
+        let eventData = Data(bytes)
         
         do {
             let busEvent = try decoder.decode(BusEvent.self, from: eventData)
             eventBus.post(event: busEvent)
         } catch {
+            let context = String(data: Data(bytes), encoding: .utf8)
             Logger.error("Failed to decode plugin event: \(error)")
-            Logger.debug("JSON String: \(string)")
+            Logger.debug("JSON String: \(String(describing: context))")
         }
     }
 }

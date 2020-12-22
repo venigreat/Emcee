@@ -242,8 +242,6 @@ public final class DefaultProcessController: ProcessController, CustomStringConv
     // MARK: - Hang Monitoring
     
     private func startAutomaticManagement() {
-        Logger.debug("Will start automatic process management", subprocessInfo)
-        
         automaticManagementTrackingTimer = DispatchBasedTimer.startedTimer(repeating: .seconds(1), leeway: .seconds(1)) { [weak self] timer in
             guard let strongSelf = self else { return timer.stop() }
             

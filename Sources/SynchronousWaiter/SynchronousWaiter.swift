@@ -21,7 +21,6 @@ public final class SynchronousWaiter: Waiter {
             let currentTime = Date().timeIntervalSince1970
             let executionDuration = currentTime - startTime
             if executionDuration > timeout.value {
-                Logger.error("Operation '\(timeout.description)' timed out after running for more than \(LoggableDuration(timeout.value)) (\(LoggableDuration(executionDuration))")
                 throw TimeoutError.waitTimeout(timeout)
             }
             if !RunLoop.current.run(mode: RunLoop.Mode.default, before: Date().addingTimeInterval(pollPeriod)) {
