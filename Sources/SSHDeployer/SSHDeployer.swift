@@ -78,7 +78,7 @@ public final class SSHDeployer: Deployer {
             host: destination.host,
             port: destination.port,
             username: destination.username,
-            password: destination.password
+            key: destination.key
         )
         try sshClient.connectAndAuthenticate()
         SSHDeployer.log(destination, "Connected and authenticated")

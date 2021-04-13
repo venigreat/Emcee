@@ -5,17 +5,17 @@ class FakeSSHClient: SSHClient {
     let host: String
     let port: Int32
     let username: String
-    let password: String
+    let key: String
     
     var calledConnectAndAuthenticate = false
     var executeCommands = [[String]]()
     var uploadCommands = [[URL: String]]()
     
-    required init(host: String, port: Int32, username: String, password: String) throws {
+    required init(host: String, port: Int32, username: String, key: String) throws {
         self.host = host
         self.port = port
         self.username = username
-        self.password = password
+        self.key = key
         
         FakeSSHClient.lastCreatedInstance = self
     }
@@ -34,5 +34,5 @@ class FakeSSHClient: SSHClient {
         uploadCommands.append([localUrl: remotePath])
     }
     
-    static var lastCreatedInstance: FakeSSHClient? 
+    static var lastCreatedInstance: FakeSSHClient?
 }

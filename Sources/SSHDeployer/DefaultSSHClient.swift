@@ -8,18 +8,18 @@ public final class DefaultSSHClient: SSHClient {
     private let host: String
     private let port: Int32
     private let username: String
-    private let password: String
+    private let key: String
     
-    public init(host: String, port: Int32, username: String, password: String) throws {
+    public init(host: String, port: Int32, username: String, key: String) throws {
         self.host = host
         self.port = port
         self.username = username
-        self.password = password
+        self.key = key
         self.ssh = try SSH(host: host, port: port)
     }
 
     public func connectAndAuthenticate() throws {
-        try ssh.authenticate(username: username, password: password)
+        try ssh.authenticate(username: username, privateKey: key)
     }
     
     @discardableResult

@@ -41,7 +41,7 @@ final class QueueServerConfigurationTests: XCTestCase {
                     "host": "queue",
                     "port": 22,
                     "username": "q_user",
-                    "password": "q_pass",
+                    "key": "q_key",
                     "remoteDeploymentPath": "/remote/queue/depl/path"
                   },
                   "queueServerTerminationPolicy": {
@@ -53,7 +53,7 @@ final class QueueServerConfigurationTests: XCTestCase {
                       "host": "host",
                       "port": 1,
                       "username": "username",
-                      "password": "password",
+                      "key": "key",
                       "remoteDeploymentPath": "/remote/deployment/path"
                     }
                   ]
@@ -80,7 +80,7 @@ final class QueueServerConfigurationTests: XCTestCase {
         )
         XCTAssertEqual(
             config.queueServerDeploymentDestination,
-            DeploymentDestination(host: "queue", port: 22, username: "q_user", password: "q_pass", remoteDeploymentPath: "/remote/queue/depl/path")
+            DeploymentDestination(host: "queue", port: 22, username: "q_user", key: "q_key", remoteDeploymentPath: "/remote/queue/depl/path")
         )
         XCTAssertEqual(
             config.queueServerTerminationPolicy,
@@ -93,7 +93,7 @@ final class QueueServerConfigurationTests: XCTestCase {
         XCTAssertEqual(
             config.workerDeploymentDestinations,
             [
-                DeploymentDestination(host: "host", port: 1, username: "username", password: "password", remoteDeploymentPath: "/remote/deployment/path")
+                DeploymentDestination(host: "host", port: 1, username: "username", key: "key", remoteDeploymentPath: "/remote/deployment/path")
             ]
         )
     }

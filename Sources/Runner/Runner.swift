@@ -282,10 +282,12 @@ public final class Runner {
         let testsWorkingDirectory = try tempFolder.pathByCreatingDirectories(
             components: ["testsWorkingDir", contextUuid.uuidString]
         )
+        let testResultDirectory = try tempFolder.pathByCreatingDirectories(components: [contextUuid.uuidString])
 
         var environment = configuration.environment
         environment[TestsWorkingDirectorySupport.envTestsWorkingDirectory] = testsWorkingDirectory.pathString
         environment = try developerDirLocator.suitableEnvironment(forDeveloperDir: developerDir, byUpdatingEnvironment: environment)
+        environment["XCRESULT_PATH"] = testResultDirectory.pathString.appending("/resultBundle.xcresult")
 
         return TestContext(
             contextUuid: contextUuid,

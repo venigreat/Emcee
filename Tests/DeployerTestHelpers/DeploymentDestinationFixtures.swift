@@ -6,7 +6,7 @@ public final class DeploymentDestinationFixtures {
     public var host: String = "localhost"
     public var port: Int32 = 42
     public var username: String = "username"
-    public var password: String = "password"
+    public var key: String = "~/.ssh/key_name"
     public var remoteDeploymentPath: String = "/Users/username/path"
     
     public init() {}
@@ -26,8 +26,8 @@ public final class DeploymentDestinationFixtures {
         return self
     }
     
-    public func with(password: String) -> DeploymentDestinationFixtures {
-        self.password = password
+    public func with(key: String) -> DeploymentDestinationFixtures {
+        self.key = key
         return self
     }
     
@@ -41,7 +41,7 @@ public final class DeploymentDestinationFixtures {
             host: host,
             port: port,
             username: username,
-            password: password,
+            key: key,
             remoteDeploymentPath: remoteDeploymentPath
         )
     }

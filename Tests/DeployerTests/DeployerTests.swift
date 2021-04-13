@@ -30,7 +30,7 @@ class DeployerTests: XCTestCase {
                 host: "localhost",
                 port: 32,
                 username: "user",
-                password: "pass",
+                key: "key",
                 remoteDeploymentPath: "/remote/path"
             ),
             processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder) { subprocess -> ProcessController in
@@ -72,7 +72,7 @@ class DeployerTests: XCTestCase {
                     host: "localhost",
                     port: 32,
                     username: "user",
-                    password: "pass",
+                    key: "key",
                     remoteDeploymentPath: "/remote/path"
                 ),
                 processControllerProvider: FakeProcessControllerProvider(tempFolder: self.tempFolder),
