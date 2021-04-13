@@ -77,7 +77,13 @@ public final class URLResourceImpl: URLResource {
     }
     
     private func startLoadingUrlResource(url: URL) {
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
+        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
+        if url.host == "" {
+            Logger.debug("Add basic auth to \(url)")
+            request.setValue("Basic ", forHTTPHeaderField:"Authorization")
+        } else {
+            Logger.debug("Not add basic auth to \(url)")
+        }
         Logger.debug("Will fetch resource '\(url)'")
         let task = createDownloadTask(request: request, url: url)
         task.resume()
