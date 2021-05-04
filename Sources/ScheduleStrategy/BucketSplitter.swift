@@ -5,11 +5,14 @@ import UniqueIdentifierGenerator
 
 public struct BucketSplitInfo {
     public let numberOfWorkers: UInt
+    public let flowNumber: UInt
     
     public init(
-        numberOfWorkers: UInt
+        numberOfWorkers: UInt,
+        flowNumber: UInt
     ) {
         self.numberOfWorkers = numberOfWorkers
+        self.flowNumber = flowNumber
     }
 }
 

@@ -125,8 +125,9 @@ public final class StartQueueServerCommand: Command {
         let queueServer = QueueServerImpl(
             automaticTerminationController: automaticTerminationController,
             bucketSplitInfo: BucketSplitInfo(
-                numberOfWorkers: UInt(queueServerConfiguration.workerSpecificConfigurations.count)
-            ),
+                numberOfWorkers: UInt(queueServerConfiguration.workerSpecificConfigurations.count),
+                flowNumber: queueServerConfiguration.workerSpecificConfigurations.map( {$0.value.numberOfSimulators} )
+                    .reduce(0, +)),
             checkAgainTimeInterval: queueServerConfiguration.checkAgainTimeInterval,
             dateProvider: try di.get(),
             deploymentDestinations: workerDestinations,

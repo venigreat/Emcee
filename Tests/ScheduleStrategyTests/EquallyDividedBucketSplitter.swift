@@ -25,7 +25,7 @@ final class EquallyDividedBucketSplitterTests: XCTestCase {
         
         let actual = equallyDividedSplitter.split(
             inputs: testEntryConfigurations,
-            bucketSplitInfo: BucketSplitInfo(numberOfWorkers: 2)
+            bucketSplitInfo: BucketSplitInfo(numberOfWorkers: 2, flowNumber: 1)
         )
         
         XCTAssertEqual(actual, expected)
@@ -36,7 +36,7 @@ final class EquallyDividedBucketSplitterTests: XCTestCase {
         
         let actual = equallyDividedSplitter.split(
             inputs: testEntryConfigurations,
-            bucketSplitInfo: BucketSplitInfo(numberOfWorkers: UInt(testEntries.count))
+            bucketSplitInfo: BucketSplitInfo(numberOfWorkers: UInt(testEntries.count), flowNumber: 1)
         )
         
         XCTAssertEqual(actual, expected)

@@ -12,6 +12,8 @@ public extension ScheduleStrategyType {
             return ProgressiveBucketSplitter(uniqueIdentifierGenerator: uniqueIdentifierGenerator)
         case .unsplit:
             return UnsplitBucketSplitter(uniqueIdentifierGenerator: uniqueIdentifierGenerator)
+        case .equallyFlowDivided:
+            return EquallyFlowDividedBucketSplitter(uniqueIdentifierGenerator: uniqueIdentifierGenerator)
         }
     }
 }

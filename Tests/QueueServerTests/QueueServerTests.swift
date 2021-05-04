@@ -33,7 +33,7 @@ final class QueueServerTests: XCTestCase {
     ).createAutomaticTerminationController()
     /// https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?&page=1
     private let localPortDeterminer = LocalPortDeterminer(portRange: 49152...65535)
-    private let bucketSplitInfo = BucketSplitInfo(numberOfWorkers: 1)
+    private let bucketSplitInfo = BucketSplitInfo(numberOfWorkers: 1, flowNumber: 1)
     private let payloadSignature = PayloadSignature(value: "expectedPayloadSignature")
     private lazy var workerAlivenessProvider: WorkerAlivenessProvider = WorkerAlivenessProviderImpl(
         knownWorkerIds: workerConfigurations.workerIds,

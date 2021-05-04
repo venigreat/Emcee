@@ -43,7 +43,7 @@ final class TestArgFileEntryTests: XCTestCase {
                 "pluginLocations": [
                     "http://example.com/plugin.zip#sample.emceeplugin"
                 ],
-                "scheduleStrategy": "unsplit",
+                "scheduleStrategy": "equallyFlowDivided",
                 "simulatorOperationTimeouts": {
                     "create": 50,
                     "boot": 51,
@@ -91,7 +91,7 @@ final class TestArgFileEntryTests: XCTestCase {
                 pluginLocations: [
                     PluginLocation(.remoteUrl(URL(string: "http://example.com/plugin.zip#sample.emceeplugin")!))
                 ],
-                scheduleStrategy: .unsplit,
+                scheduleStrategy: .equallyFlowDivided,
                 simulatorControlTool: SimulatorControlTool(
                     location: .insideUserLibrary,
                     tool: .fbsimctl(FbsimctlLocation(.remoteUrl(URL(string: "http://example.com/fbsimctl.zip")!)))

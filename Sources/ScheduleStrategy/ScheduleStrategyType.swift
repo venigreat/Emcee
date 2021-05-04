@@ -5,6 +5,7 @@ public enum ScheduleStrategyType: String, Codable, Equatable, CaseIterable {
     case equallyDivided = "equally_divided"
     case progressive = "progressive"
     case unsplit = "unsplit"
+    case equallyFlowDivided = "equallyFlowDivided"
     
     public static let availableRawValues: [String] = allCases.map { $0.rawValue }
 }
