@@ -1,7 +1,7 @@
 import EventBus
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 import PluginSupport
 import ProcessController
@@ -12,6 +12,7 @@ public final class PluginManager: EventStream {
     private let encoder = JSONEncoder.pretty()
     private let eventDistributor: EventDistributor
     private let fileSystem: FileSystem
+    private let logger: ContextualLogger
     private let pluginLocations: Set<PluginLocation>
     private let pluginsConnectionTimeout: TimeInterval = 30.0
     private let processControllerProvider: ProcessControllerProvider
@@ -25,12 +26,15 @@ public final class PluginManager: EventStream {
     
     public init(
         fileSystem: FileSystem,
+        logger: ContextualLogger,
         pluginLocations: Set<PluginLocation>,
         processControllerProvider: ProcessControllerProvider,
         resourceLocationResolver: ResourceLocationResolver
     ) {
         self.fileSystem = fileSystem
-        self.eventDistributor = EventDistributor(sessionId: sessionId)
+        self.logger = logger
+            .withMetadata(key: "pluginSessionId", value: sessionId.uuidString)
+        self.eventDistributor = EventDistributor(logger: logger)
         self.pluginLocations = pluginLocations
         self.processControllerProvider = processControllerProvider
         self.resourceLocationResolver = resourceLocationResolver
@@ -89,7 +93,7 @@ public final class PluginManager: EventStream {
         let pluginBundles = try pathsToPluginBundles()
         
         for bundlePath in pluginBundles {
-            Logger.debug("[\(sessionId)] Starting plugin at '\(bundlePath)'")
+            logger.debug("Starting plugin at '\(bundlePath)'")
             let pluginExecutable = bundlePath.appending(component: PluginManager.pluginExecutableName)
             let pluginIdentifier = try pluginExecutable.pathString.avito_sha256Hash()
             eventDistributor.add(pluginIdentifier: pluginIdentifier)
@@ -102,28 +106,28 @@ public final class PluginManager: EventStream {
                     )
                 )
             )
-            controller.start()
+            try controller.start()
             processControllers.append(controller)
         }
         
         do {
             try eventDistributor.waitForPluginsToConnect(timeout: pluginsConnectionTimeout)
         } catch {
-            Logger.error("[\(sessionId)] Failed to start plugins, will not tear down")
+            logger.error("Failed to start plugins, will not tear down")
             tearDown()
             throw error
         }
     }
     
-    private func environmentForLaunchingPlugin(pluginSocket: String, pluginIdentifier: String) -> [String: String] {
-        return [
+    private func environmentForLaunchingPlugin(pluginSocket: String, pluginIdentifier: String) -> Environment {
+        [
             PluginSupport.pluginSocketEnv: pluginSocket,
             PluginSupport.pluginIdentifierEnv: pluginIdentifier
         ]
     }
     
     private func killPlugins() {
-        Logger.debug("[\(sessionId)] Killing plugins that are still alive")
+        logger.debug("Killing plugins that are still alive")
         for controller in processControllers {
             controller.interruptAndForceKillIfNeeded()
         }
@@ -152,10 +156,10 @@ public final class PluginManager: EventStream {
     
     private func tearDown() {
         do {
-            try SynchronousWaiter().waitWhile(timeout: tearDownAllowance, description: "[\(sessionId)] Tear down plugins") {
+            try SynchronousWaiter().waitWhile(timeout: tearDownAllowance, description: "Tear down plugins") {
                 processControllers.map { $0.isProcessRunning }.contains(true)
             }
-            Logger.debug("[\(sessionId)] All plugins torn down successfully without force killing.")
+            logger.debug("All plugins torn down successfully without force killing.")
         } catch {
             killPlugins()
         }
@@ -169,7 +173,7 @@ public final class PluginManager: EventStream {
             let data = try encoder.encode(busEvent)
             sendData(data)
         } catch {
-            Logger.error("[\(sessionId)] Failed to get data for \(busEvent) event: \(error)")
+            logger.error("Failed to get data for \(busEvent) event: \(error)")
         }
     }
     

@@ -1,20 +1,12 @@
 import BucketQueueModels
+import Extensions
 import Foundation
-import Logging
 
 public final class BucketQueueHolder {
-    private var enqueuedBuckets = [EnqueuedBucket]() {
-        didSet {
-            Logger.debug("Updated enqueued buckets count: \(enqueuedBuckets.count)")
-        }
-    }
-    private var dequeuedBuckets = Set<DequeuedBucket>() {
-        didSet {
-            Logger.debug("Updated dequeued buckets count: \(dequeuedBuckets.count)")
-        }
-    }
+    private var enqueuedBuckets = [EnqueuedBucket]()
+    private var dequeuedBuckets = Set<DequeuedBucket>()
 
-    private let syncQueue = DispatchQueue(label: "BucketQueueHolder.syncQueue")
+    private let accessLock = NSLock()
     private let exclusiveAccessLock = NSRecursiveLock()
 
     public init() {}
@@ -22,42 +14,37 @@ public final class BucketQueueHolder {
     public func performWithExclusiveAccess<T>(
         work: () throws -> T
     ) rethrows -> T {
-        exclusiveAccessLock.lock()
-        defer {
-            exclusiveAccessLock.unlock()
-        }
-        return try work()
+        try exclusiveAccessLock.whileLocked(work)
     }
     
     public func removeAllEnqueuedBuckets() {
-        syncQueue.sync {
-            Logger.debug("Removing all enqueued buckets (\(enqueuedBuckets.count) items)")
+        accessLock.whileLocked {
             enqueuedBuckets.removeAll()
         }
     }
     
     public var allEnqueuedBuckets: [EnqueuedBucket] {
-        syncQueue.sync { enqueuedBuckets }
+        accessLock.whileLocked { enqueuedBuckets }
     }
     
     public var allDequeuedBuckets: Set<DequeuedBucket> {
-        syncQueue.sync { dequeuedBuckets }
+        accessLock.whileLocked { dequeuedBuckets }
     }
     
     public func remove(dequeuedBucket: DequeuedBucket) {
-        syncQueue.sync {
+        accessLock.whileLocked {
             _ = dequeuedBuckets.remove(dequeuedBucket)
         }
     }
     
     public func insert(enqueuedBuckets: [EnqueuedBucket], position: Int) {
-        syncQueue.sync {
+        accessLock.whileLocked {
             self.enqueuedBuckets.insert(contentsOf: enqueuedBuckets, at: position)
         }
     }
     
     public func replacePreviouslyEnqueuedBucket(withDequeuedBucket dequeuedBucket: DequeuedBucket) {
-        syncQueue.sync {
+        accessLock.whileLocked {
             enqueuedBuckets.removeAll(where: { $0 == dequeuedBucket.enqueuedBucket })
             _ = dequeuedBuckets.insert(dequeuedBucket)
         }

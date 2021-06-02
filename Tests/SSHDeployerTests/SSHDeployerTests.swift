@@ -3,7 +3,7 @@
 import Foundation
 import PathLib
 import ProcessControllerTestHelpers
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import UniqueIdentifierGeneratorTestHelpers
 import XCTest
@@ -37,7 +37,8 @@ class SSHDeployerTests: XCTestCase {
                 ]
             ],
             destination: destination,
-            processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder),
+            logger: .noOp,
+            processControllerProvider: FakeProcessControllerProvider(),
             temporaryFolder: tempFolder,
             uniqueIdentifierGenerator: uniqueIdentifierGenerator
         )

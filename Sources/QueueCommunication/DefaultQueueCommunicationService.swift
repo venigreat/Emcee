@@ -1,7 +1,7 @@
 import Deployer
 import Dispatch
 import Foundation
-import Logging
+import EmceeLogging
 import QueueModels
 import RESTMethods
 import RequestSender
@@ -9,6 +9,7 @@ import SocketModels
 import Types
 
 public class DefaultQueueCommunicationService: QueueCommunicationService {
+    private let logger: ContextualLogger
     private let requestSenderProvider: RequestSenderProvider
     private let remoteQueueDetector: RemoteQueueDetector
     private let requestTimeout: TimeInterval
@@ -21,12 +22,14 @@ public class DefaultQueueCommunicationService: QueueCommunicationService {
     )
     
     public init(
+        logger: ContextualLogger,
         remoteQueueDetector: RemoteQueueDetector,
         requestSenderProvider: RequestSenderProvider,
         requestTimeout: TimeInterval,
         socketHost: String,
         version: Version
     ) {
+        self.logger = logger
         self.remoteQueueDetector = remoteQueueDetector
         self.requestSenderProvider = requestSenderProvider
         self.requestTimeout = requestTimeout
@@ -62,7 +65,7 @@ public class DefaultQueueCommunicationService: QueueCommunicationService {
                 }
             )
         } catch {
-            Logger.error("Failed to find master queue port: \(error)")
+            logger.error("Failed to find master queue port: \(error)")
             return completion(Either.error(error))
         }
     }

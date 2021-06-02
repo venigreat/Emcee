@@ -1,7 +1,7 @@
 import Dispatch
 import FileCache
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 
 public protocol URLResource {
@@ -15,6 +15,7 @@ public protocol URLResource {
 
 public final class URLResourceImpl: URLResource {
     private let fileCache: FileCache
+    private let logger: ContextualLogger
     private let urlSession: URLSession
     private let syncQueue = DispatchQueue(label: "URLResource.syncQueue")
     private let handlerQueue = DispatchQueue(label: "URLResource.handlerQueue")
@@ -40,8 +41,13 @@ public final class URLResourceImpl: URLResource {
         }
     }
     
-    public init(fileCache: FileCache, urlSession: URLSession) {
+    public init(
+        fileCache: FileCache,
+        logger: ContextualLogger,
+        urlSession: URLSession
+    ) {
         self.fileCache = fileCache
+        self.logger = logger
         self.urlSession = urlSession
         self.handlersWrapper = HandlersWrapper(handlerQueue: handlerQueue)
     }
@@ -130,7 +136,7 @@ public final class URLResourceImpl: URLResource {
                 
                 try fileCache.store(contentsPath: AbsolutePath(localUrl), ofUrl: url, operation: .move)
                 let path = try fileCache.pathForCachedContents(ofUrl: url)
-                Logger.debug("Stored resource for '\(url)' in file cache")
+                self.logger.debug("Stored resource for '\(url)' in file cache")
                 handlersWrapper.resource(path: path, forUrl: url)
             } catch {
                 handlersWrapper.failedToGetContents(forUrl: url, error: error)
@@ -152,7 +158,7 @@ public final class URLResourceImpl: URLResource {
         
         let sizeInBytes = downloadedSize.intValue
         let speedInKBytesPerSecond = Int(Double(sizeInBytes) / 1024 / timeToDownload)
-        Logger.verboseDebug("Downloaded resource for '\(url)' in \(Int(timeToDownload)) seconds, size: \(sizeInBytes) bytes, speed: \(speedInKBytesPerSecond) KB/s")
+        logger.debug("Downloaded resource for '\(url)' in \(Int(timeToDownload)) seconds, size: \(sizeInBytes) bytes, speed: \(speedInKBytesPerSecond) KB/s")
         
         if response.expectedContentLength > 0, response.expectedContentLength != sizeInBytes {
             throw URLResourceError.unexpectedDownloadSize(url: url, expected: response.expectedContentLength, actual: downloadedSize.intValue)

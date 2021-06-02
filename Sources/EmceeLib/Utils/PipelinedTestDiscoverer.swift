@@ -1,7 +1,7 @@
 import AtomicModels
 import BuildArtifacts
 import DI
-import Logging
+import EmceeLogging
 import Foundation
 import QueueModels
 import ResourceLocation
@@ -37,21 +37,22 @@ public final class PipelinedTestDiscoverer {
     }
     
     public func performTestDiscovery(
+        logger: ContextualLogger,
         testArgFile: TestArgFile,
         emceeVersion: Version,
         remoteCacheConfig: RuntimeDumpRemoteCacheConfig?
-    ) throws -> [[DiscoveredTestEntry]] {
+    ) throws -> [[DiscoveredTestEntry]] {        
         let discoveredTests = AtomicValue<[[DiscoveredTestEntry]]>(
             Array(repeating: [], count: testArgFile.entries.count)
         )
         let collectedErrors = AtomicValue<[Error]>([])
         
-        let rootOperation = BlockOperation {
-            Logger.debug("Finished pipelined test discovery")
+        let rootOperation = BlockOperation { [logger] in
+            logger.debug("Finished pipelined test discovery")
         }
         
         testArgFile.entries.enumerated().forEach { index, testArgFileEntry in
-            let downloadOperation = BlockOperation { [urlResource] in
+            let downloadOperation = BlockOperation { [urlResource, logger] in
                 do {
                     let requiredArtifacts = try testArgFileEntry.buildArtifacts.requiredArtifacts()
                     for artifact in requiredArtifacts {
@@ -59,16 +60,17 @@ public final class PipelinedTestDiscoverer {
                             let handler = BlockingURLResourceHandler()
                             urlResource.fetchResource(url: url, handler: handler)
                             let path = try handler.wait(limit: 30, remoteUrl: url)
-                            Logger.debug("Prefetched contents of URL \(url) to \(path)")
+                            logger.debug("Prefetched contents of URL \(url) to \(path)")
                         }
                     }
                 } catch {
-                    Logger.warning("Failed to prefetch build artifacts for test arg file entry at index \(index): \(error). This error will be ignored.")
+                    logger.warning("Failed to prefetch build artifacts for test arg file entry at index \(index): \(error). This error will be ignored.")
                 }
             }
-            let dumpOperation = BlockOperation { [runtimeDumpRemoteCacheProvider, testDiscoveryQuerier] in
+            let dumpOperation = BlockOperation { [logger, runtimeDumpRemoteCacheProvider, testDiscoveryQuerier] in
                 do {
                     let configuration = TestDiscoveryConfiguration(
+                        analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration,
                         developerDir: testArgFileEntry.developerDir,
                         pluginLocations: testArgFileEntry.pluginLocations,
                         testDiscoveryMode: try TestDiscoveryModeDeterminer.testDiscoveryMode(testArgFileEntry: testArgFileEntry),
@@ -83,18 +85,19 @@ public final class PipelinedTestDiscoverer {
                         testTimeoutConfiguration: testTimeoutConfigurationForRuntimeDump,
                         testsToValidate: testArgFileEntry.testsToRun,
                         xcTestBundleLocation: testArgFileEntry.buildArtifacts.xcTestBundle.location,
-                        persistentMetricsJobId: testArgFile.prioritizedJob.persistentMetricsJobId,
-                        remoteCache: runtimeDumpRemoteCacheProvider.remoteCache(config: remoteCacheConfig)
+                        remoteCache: runtimeDumpRemoteCacheProvider.remoteCache(config: remoteCacheConfig),
+                        logger: logger
                     )
                     
                     let result = try testDiscoveryQuerier.query(
                         configuration: configuration
                     ).discoveredTests.tests
-                    Logger.debug("Test bundle \(testArgFileEntry.buildArtifacts.xcTestBundle) contains \(result.count) tests")
+                    logger.debug("Test bundle \(testArgFileEntry.buildArtifacts.xcTestBundle) contains \(result.count) tests")
                     discoveredTests.withExclusiveAccess {
                         $0[index] = result
                     }
                 } catch {
+                    logger.error("Failed to discover tests for test bundle \(testArgFileEntry.buildArtifacts.xcTestBundle): \(error)")
                     collectedErrors.withExclusiveAccess {
                         $0.append(CollectedError.testDiscoveryError(entryIndex: index, error: error))
                     }

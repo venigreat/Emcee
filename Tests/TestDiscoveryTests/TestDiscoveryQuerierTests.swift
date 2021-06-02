@@ -5,6 +5,7 @@ import DeveloperDirLocatorTestHelpers
 import DeveloperDirModels
 import FileSystemTestHelpers
 import Foundation
+import MetricsExtensions
 import MetricsTestHelpers
 import PluginManagerTestHelpers
 import ProcessController
@@ -17,7 +18,7 @@ import RunnerModels
 import RunnerTestHelpers
 import SimulatorPoolTestHelpers
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import TestArgFile
 import TestHelpers
 import UniqueIdentifierGenerator
@@ -217,10 +218,11 @@ final class TestDiscoveryQuerierTests: XCTestCase {
             dateProvider: DateProviderFixture(),
             developerDirLocator: developerDirLocator,
             fileSystem: fileSystem,
-            metricRecorder: NoOpMetricRecorder(),
+            globalMetricRecorder: GlobalMetricRecorderImpl(),
+            specificMetricRecorderProvider: NoOpSpecificMetricRecorderProvider(),
             onDemandSimulatorPool: simulatorPool,
             pluginEventBusProvider: NoOoPluginEventBusProvider(),
-            processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder),
+            processControllerProvider: FakeProcessControllerProvider(),
             resourceLocationResolver: resourceLocationResolver,
             tempFolder: tempFolder,
             testRunnerProvider: testRunnerProvider,
@@ -236,29 +238,30 @@ final class TestDiscoveryQuerierTests: XCTestCase {
         xcTestBundleLocation: TestBundleLocation = TestBundleLocation(ResourceLocation.localFilePath(""))
     ) -> TestDiscoveryConfiguration {
         return TestDiscoveryConfiguration(
+            analyticsConfiguration: AnalyticsConfiguration(),
             developerDir: DeveloperDir.current,
             pluginLocations: [],
-            testDiscoveryMode: .runtimeLogicTest(applicationTestSupport?.simulatorControlTool ?? SimulatorControlToolFixtures.fakeFbsimctlTool),
+            testDiscoveryMode: .runtimeLogicTest(applicationTestSupport?.simulatorControlTool ?? SimulatorControlToolFixtures.simctlTool),
             simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
             simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
             testDestination: TestDestinationFixtures.testDestination,
             testExecutionBehavior: TestExecutionBehavior(environment: [:], numberOfRetries: 0),
-            testRunnerTool: TestRunnerToolFixtures.fakeFbxctestTool,
+            testRunnerTool: .xcodebuild,
             testTimeoutConfiguration: TestTimeoutConfiguration(
                 singleTestMaximumDuration: 10,
                 testRunnerMaximumSilenceDuration: 10
             ),
             testsToValidate: testsToValidate,
             xcTestBundleLocation: xcTestBundleLocation,
-            persistentMetricsJobId: "",
-            remoteCache: remoteCache
+            remoteCache: remoteCache,
+            logger: .noOp
         )
     }
 
     private func buildApplicationTestSupport() -> RuntimeDumpApplicationTestSupport {
         return RuntimeDumpApplicationTestSupport(
             appBundle: AppBundleLocation(.localFilePath("")),
-            simulatorControlTool: SimulatorControlToolFixtures.fakeFbsimctlTool
+            simulatorControlTool: SimulatorControlToolFixtures.simctlTool
         )
     }
 }

@@ -1,5 +1,6 @@
 import DistWorkerModels
 import DistWorkerModelsTestHelpers
+import EmceeLogging
 import Foundation
 import QueueCommunicationTestHelpers
 import QueueModels
@@ -14,6 +15,7 @@ import XCTest
 final class WorkerRegistrarTests: XCTestCase {
     lazy var alivenessTracker = WorkerAlivenessProviderImpl(
         knownWorkerIds: [workerId],
+        logger: .noOp,
         workerPermissionProvider: FakeWorkerPermissionProvider()
     )
     lazy var workerCapabilitiesStorage = WorkerCapabilitiesStorageImpl()
@@ -27,6 +29,7 @@ final class WorkerRegistrarTests: XCTestCase {
     
     private func createRegistrar() -> WorkerRegistrar {
         return WorkerRegistrar(
+            logger: .noOp,
             workerAlivenessProvider: alivenessTracker,
             workerCapabilitiesStorage: workerCapabilitiesStorage,
             workerConfigurations: workerConfigurations,

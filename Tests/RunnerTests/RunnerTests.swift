@@ -5,7 +5,8 @@ import DeveloperDirLocatorTestHelpers
 import EventBus
 import FileSystemTestHelpers
 import Foundation
-import Logging
+import EmceeLogging
+import MetricsExtensions
 import MetricsTestHelpers
 import PluginManagerTestHelpers
 import QueueModels
@@ -16,8 +17,9 @@ import RunnerTestHelpers
 import SimulatorPoolModels
 import SimulatorPoolTestHelpers
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import TestHelpers
+import UniqueIdentifierGeneratorTestHelpers
 import XCTest
 
 public final class RunnerTests: XCTestCase {
@@ -30,6 +32,7 @@ public final class RunnerTests: XCTestCase {
     lazy var tempFolder = assertDoesNotThrow { try TemporaryFolder() }
     lazy var fileSystem = FakeFileSystem(rootPath: tempFolder.absolutePath)
     lazy var dateProvider = DateProviderFixture(Date(timeIntervalSince1970: 100))
+    lazy var uniqueIdentifierGenerator = FixedValueUniqueIdentifierGenerator(value: "someId")
     
     func test___running_test_without_output_to_stream___provides_test_did_not_run_results() throws {
         testRunnerProvider.predefinedFakeTestRunner.disableTestStartedTestRunnerStreamEvents()
@@ -135,6 +138,28 @@ public final class RunnerTests: XCTestCase {
         XCTAssertEqual(testResult.testEntry, testEntry)
         XCTAssertEqual(testResult.testRunResults[0].exceptions.first, RunnerConstants.testDidNotRun(testEntry.testName).testException)
     }
+    
+    func test___running_test_without_stop_event___does_not_revive___when_revive_is_disabled() throws {
+        testRunnerProvider.predefinedFakeTestRunner.disableTestStoppedTestRunnerStreamEvents()
+
+        var numberOfAttemptsToRunTest = 0
+        testRunnerProvider.predefinedFakeTestRunner.onExecuteTest = { _ in
+            numberOfAttemptsToRunTest += 1
+            return .success
+        }
+
+        let runnerResults = try runTestEntries([testEntry], environment: [Runner.skipReviveAttemptsEnvName: "true"])
+
+        XCTAssertEqual(numberOfAttemptsToRunTest, 1)
+
+        guard runnerResults.testEntryResults.count == 1, let testResult = runnerResults.testEntryResults.first else {
+            failTest("Unexpected number of test results")
+        }
+
+        XCTAssertFalse(testResult.succeeded)
+        XCTAssertEqual(testResult.testEntry, testEntry)
+        XCTAssertEqual(testResult.testRunResults[0].exceptions.first, RunnerConstants.testDidNotRun(testEntry.testName).testException)
+    }
 
     func test___running_test_and_reviving_after_test_stopped_event_loss___provides_back_correct_result() throws {
         var didRevive = false
@@ -223,7 +248,6 @@ public final class RunnerTests: XCTestCase {
         
         let streamClosedExpectation = expectationForDidRunEvent()
         
-        
         let handlerInvokedExpectation = XCTestExpectation(description: "stream close handler called")
         
         testRunnerProvider.predefinedFakeTestRunner.onStreamClose = { testRunnerStream in
@@ -239,6 +263,155 @@ public final class RunnerTests: XCTestCase {
         _ = try runTestEntries([testEntry])
         
         wait(for: [handlerInvokedExpectation], timeout: 5)
+    }
+    
+    func test___deletes_tests_working_directory___after_run() throws {
+        let testsWorkingDirDeletedExpectation = XCTestExpectation(description: "testsWorkingDir is deleted")
+        fileSystem.onDelete = { [tempFolder, uniqueIdentifierGenerator] path in
+            if path == tempFolder.pathWith(components: ["testsWorkingDir", uniqueIdentifierGenerator.generate()]) {
+                testsWorkingDirDeletedExpectation.fulfill()
+            }
+        }
+        
+        _ = try runTestEntries([testEntry])
+        
+        wait(for: [testsWorkingDirDeletedExpectation], timeout: 0)
+    }
+    
+    func test___when_exception_outside_test_started_test_finished_happens___these_exceptions_are_appended_to_all_lost_tests() throws {
+        let outOfScopeException = TestException(reason: "some out-of-scope exception", filePathInProject: "", lineNumber: 0)
+        
+        testRunnerProvider.predefinedFakeTestRunner.onStreamOpen = { testRunnerStream in
+            testRunnerStream.openStream()
+            testRunnerStream.caughtException(testException: outOfScopeException)
+        }
+        testRunnerProvider.predefinedFakeTestRunner.disableTestStartedTestRunnerStreamEvents()
+        testRunnerProvider.predefinedFakeTestRunner.disableTestStoppedTestRunnerStreamEvents()
+        
+        let testEntry1 = TestEntryFixtures.testEntry(className: "class1", methodName: "test1")
+        let testEntry2 = TestEntryFixtures.testEntry(className: "class2", methodName: "test2")
+
+        let runnerResults = try runTestEntries([testEntry1, testEntry2])
+
+        guard runnerResults.testEntryResults.count == 2 else {
+            failTest("Unexpected number of test results")
+        }
+
+        for testEntryResult in runnerResults.testEntryResults {
+            guard testEntryResult.testRunResults.count == 1 else {
+                failTest("Unexpected number of test run results")
+            }
+            
+            let testRunResult = testEntryResult.testRunResults[0]
+            assert {
+                testRunResult.exceptions
+            } equals: {
+                [
+                    outOfScopeException,
+                    RunnerConstants.testDidNotRun(testEntryResult.testEntry.testName).testException
+                ]
+            }
+        }
+    }
+    
+    func test___after_test_execution___logs_are_attached_to_result___when_log_capturing_is_enabled() throws {
+        testRunnerProvider.predefinedFakeTestRunner.onStreamOpen = { testRunnerStream in
+            testRunnerStream.openStream()
+            
+            testRunnerStream.logCaptured(entry: TestLogEntry(contents: "first log"))
+            testRunnerStream.logCaptured(entry: TestLogEntry(contents: "second log"))
+        }
+
+        let runnerResults = try runTestEntries([testEntry], environment: [Runner.logCapturingModeEnvName: Runner.LogCapturingMode.allLogs.rawValue])
+        
+        guard runnerResults.testEntryResults.count == 1, let testResult = runnerResults.testEntryResults.first else {
+            failTest("Unexpected number of test results")
+        }
+
+        XCTAssertEqual(
+            testResult.testRunResults[0].logs,
+            [
+                TestLogEntry(contents: "first log"),
+                TestLogEntry(contents: "second log"),
+            ]
+        )
+    }
+    
+    func test___after_test_execution___logs_are_not_attached_to_result___when_log_capturing_is_disabled() throws {
+        testRunnerProvider.predefinedFakeTestRunner.onStreamOpen = { testRunnerStream in
+            testRunnerStream.openStream()
+            
+            testRunnerStream.logCaptured(entry: TestLogEntry(contents: "first log"))
+            testRunnerStream.logCaptured(entry: TestLogEntry(contents: "second log"))
+        }
+
+        let runnerResults = try runTestEntries([testEntry])
+        
+        guard runnerResults.testEntryResults.count == 1, let testResult = runnerResults.testEntryResults.first else {
+            failTest("Unexpected number of test results")
+        }
+
+        assertTrue {
+            testResult.testRunResults[0].logs.isEmpty
+        }
+    }
+    
+    func test___after_test_execution___crash_logs_are_attached_to_result___when_only_crash_logs_capturing_is_enabled() throws {
+        let crashLogEntry = TestLogEntry(contents: "Process: Tratata, Crashed Thread: Some Index")
+        
+        testRunnerProvider.predefinedFakeTestRunner.onStreamOpen = { testRunnerStream in
+            testRunnerStream.openStream()
+            
+            testRunnerStream.logCaptured(entry: TestLogEntry(contents: "first log"))
+            testRunnerStream.logCaptured(entry: crashLogEntry)
+        }
+
+        let runnerResults = try runTestEntries([testEntry], environment: [Runner.logCapturingModeEnvName: Runner.LogCapturingMode.onlyCrashLogs.rawValue])
+        
+        guard runnerResults.testEntryResults.count == 1, let testResult = runnerResults.testEntryResults.first else {
+            failTest("Unexpected number of test results")
+        }
+        
+        assert {
+            testResult.testRunResults[0].logs
+        } equals: {
+            [crashLogEntry]
+        }
+    }
+    
+    func test___after_test_crash___logs_are_attached_to_result___when_log_capturing_is_enabled() throws {
+        let logEntry = TestLogEntry(contents: "log entry contents")
+        
+        testRunnerProvider.predefinedFakeTestRunner.onStreamOpen = { testRunnerStream in
+            testRunnerStream.openStream()
+            testRunnerStream.logCaptured(entry: logEntry)
+        }
+        testRunnerProvider.predefinedFakeTestRunner.disableTestStartedTestRunnerStreamEvents()
+        testRunnerProvider.predefinedFakeTestRunner.disableTestStoppedTestRunnerStreamEvents()
+        
+        let testEntry1 = TestEntryFixtures.testEntry(className: "class1", methodName: "test1")
+        let testEntry2 = TestEntryFixtures.testEntry(className: "class2", methodName: "test2")
+
+        let runnerResults = try runTestEntries([testEntry1, testEntry2], environment: [Runner.logCapturingModeEnvName: Runner.LogCapturingMode.allLogs.rawValue])
+
+        guard runnerResults.testEntryResults.count == 2 else {
+            failTest("Unexpected number of test results")
+        }
+
+        for testEntryResult in runnerResults.testEntryResults {
+            guard testEntryResult.testRunResults.count == 1 else {
+                failTest("Unexpected number of test run results")
+            }
+            
+            let testRunResult = testEntryResult.testRunResults[0]
+            assert {
+                testRunResult.logs
+            } equals: {
+                [
+                    logEntry
+                ]
+            }
+        }
     }
     
     private func expectationForDidRunEvent() -> XCTestExpectation {
@@ -263,20 +436,22 @@ public final class RunnerTests: XCTestCase {
         return eventExpectation
     }
     
-    private func runTestEntries(_ testEntries: [TestEntry]) throws -> RunnerRunResult {
+    private func runTestEntries(_ testEntries: [TestEntry], environment: [String: String] = [:]) throws -> RunnerRunResult {
         let runner = Runner(
-            configuration: createRunnerConfig(),
+            configuration: createRunnerConfig(environment: environment),
             dateProvider: dateProvider,
             developerDirLocator: FakeDeveloperDirLocator(result: tempFolder.absolutePath),
             fileSystem: fileSystem,
+            logger: .noOp,
+            persistentMetricsJobId: nil,
             pluginEventBusProvider: noOpPluginEventBusProvider,
             resourceLocationResolver: resolver,
+            specificMetricRecorder: SpecificMetricRecorderWrapper(NoOpMetricRecorder()),
             tempFolder: tempFolder,
             testRunnerProvider: testRunnerProvider,
             testTimeoutCheckInterval: .milliseconds(100),
+            uniqueIdentifierGenerator: uniqueIdentifierGenerator,
             version: Version(value: "version"),
-            persistentMetricsJobId: "",
-            metricRecorder: NoOpMetricRecorder(),
             waiter: SynchronousWaiter()
         )
         return try runner.run(
@@ -290,13 +465,13 @@ public final class RunnerTests: XCTestCase {
         )
     }
 
-    private func createRunnerConfig() -> RunnerConfiguration {
+    private func createRunnerConfig(environment: [String: String]) -> RunnerConfiguration {
         return RunnerConfiguration(
             buildArtifacts: BuildArtifactsFixtures.fakeEmptyBuildArtifacts(),
-            environment: [:],
+            environment: environment,
             pluginLocations: [],
             simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
-            testRunnerTool: TestRunnerToolFixtures.fakeFbxctestTool,
+            testRunnerTool: .xcodebuild,
             testTimeoutConfiguration: TestTimeoutConfiguration(
                 singleTestMaximumDuration: testTimeout,
                 testRunnerMaximumSilenceDuration: 0

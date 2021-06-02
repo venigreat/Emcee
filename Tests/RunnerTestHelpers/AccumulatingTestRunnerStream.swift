@@ -21,12 +21,19 @@ public final class AccumulatingTestRunnerStream: TestRunnerStream {
         accumulatedData.append(testException)
     }
     
+    public func logCaptured(entry: TestLogEntry) {
+        accumulatedData.append(entry)
+    }
+    
     public func testStopped(testStoppedEvent: TestStoppedEvent) {
         accumulatedData.append(testStoppedEvent)
     }
     
+    public var onCloseStream: () -> () = {}
+    
     public func closeStream() {
         streamIsOpen = false
+        onCloseStream()
     }
     
     public func castTo<T>(_ type: T.Type, index: Int) -> T? {

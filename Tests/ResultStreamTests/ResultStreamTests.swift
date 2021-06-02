@@ -38,6 +38,7 @@ final class ResultStreamTests: XCTestCase {
                 result: .success,
                 testDuration: 7.6910330057144165,
                 testExceptions: [],
+                logs: [],
                 testStartTimestamp: dateProvider.currentDate().timeIntervalSince1970 - 7.6910330057144165
             )
         )
@@ -63,6 +64,7 @@ final class ResultStreamTests: XCTestCase {
     private func resultStream(with contents: String) -> ResultStream {
         let stream = ResultStreamImpl(
             dateProvider: dateProvider,
+            logger: .noOp,
             testRunnerStream: testRunnerStream
         )
         stream.write(data: contents.data(using: .utf8) ?? Data())

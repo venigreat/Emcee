@@ -7,7 +7,7 @@ import SimulatorPool
 import SimulatorPoolModels
 import SimulatorPoolTestHelpers
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import XCTest
 
@@ -282,6 +282,7 @@ final class StateMachineDrivenSimulatorControllerTests: XCTestCase {
             coreSimulatorStateProvider: coreSimulatorStateProvider,
             developerDir: .current,
             developerDirLocator: developerDirLocator,
+            logger: .noOp,
             simulatorStateMachine: SimulatorStateMachine(),
             simulatorStateMachineActionExecutor: actionExecutor,
             temporaryFolder: try TemporaryFolder(),

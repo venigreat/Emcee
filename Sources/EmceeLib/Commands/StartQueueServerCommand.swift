@@ -8,9 +8,10 @@ import EmceeVersion
 import Foundation
 import LocalHostDeterminer
 import LocalQueueServerRunner
-import Logging
+import EmceeLogging
 import LoggingSetup
 import Metrics
+import MetricsExtensions
 import PluginManager
 import PortDeterminer
 import ProcessController
@@ -21,7 +22,7 @@ import RemotePortDeterminer
 import RequestSender
 import ResourceLocationResolver
 import ScheduleStrategy
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 import WorkerAlivenessProvider
 import WorkerCapabilities
@@ -42,7 +43,7 @@ public final class StartQueueServerCommand: Command {
     
     private let di: DI
 
-    public init(di: DI) {
+    public init(di: DI) throws {
         self.di = di
     }
     
@@ -53,27 +54,35 @@ public final class StartQueueServerCommand: Command {
             resourceLocationResolver: try di.get()
         )
         
-        if let sentryConfiguration = queueServerConfiguration.analyticsConfiguration.sentryConfiguration {
-            try AnalyticsSetup.setupSentry(sentryConfiguration: sentryConfiguration, emceeVersion: emceeVersion)
+        try di.get(GlobalMetricRecorder.self).set(analyticsConfiguration: queueServerConfiguration.globalAnalyticsConfiguration)
+        if let kibanaConfiguration = queueServerConfiguration.globalAnalyticsConfiguration.kibanaConfiguration {
+            try di.get(LoggingSetup.self).set(kibanaConfiguration: kibanaConfiguration)
         }
-        try di.get(MutableMetricRecorder.self).set(analyticsConfiguration: queueServerConfiguration.analyticsConfiguration)
         
+        di.set(
+            try di.get(ContextualLogger.self).with(
+                analyticsConfiguration: queueServerConfiguration.globalAnalyticsConfiguration
+            )
+        )
+
         try startQueueServer(
             emceeVersion: emceeVersion,
             queueServerConfiguration: queueServerConfiguration,
-            workerDestinations: queueServerConfiguration.workerDeploymentDestinations
+            workerDestinations: queueServerConfiguration.workerDeploymentDestinations,
+            logger: try di.get()
         )
     }
     
     private func startQueueServer(
         emceeVersion: Version,
         queueServerConfiguration: QueueServerConfiguration,
-        workerDestinations: [DeploymentDestination]
+        workerDestinations: [DeploymentDestination],
+        logger: ContextualLogger
     ) throws {
         di.set(
             PayloadSignature(value: try di.get(UniqueIdentifierGenerator.self).generate())
         )
-        Logger.info("Generated payload signature: \(try di.get(PayloadSignature.self))")
+        logger.debug("Generated payload signature: \(try di.get(PayloadSignature.self))")
         
         let automaticTerminationController = AutomaticTerminationControllerFactory(
             automaticTerminationPolicy: queueServerConfiguration.queueServerTerminationPolicy
@@ -82,12 +91,15 @@ public final class StartQueueServerCommand: Command {
         let socketHost = LocalHostDeterminer.currentHostAddress
         let remotePortDeterminer = RemoteQueuePortScanner(
             host: socketHost,
+            logger: logger,
             portRange: EmceePorts.defaultQueuePortRange,
             requestSenderProvider: try di.get()
         )
         let queueCommunicationService = DefaultQueueCommunicationService(
+            logger: logger,
             remoteQueueDetector: DefaultRemoteQueueDetector(
                 emceeVersion: emceeVersion,
+                logger: logger,
                 remotePortDeterminer: remotePortDeterminer
             ),
             requestSenderProvider: try di.get(),
@@ -99,19 +111,26 @@ public final class StartQueueServerCommand: Command {
             communicationService: queueCommunicationService,
             defaultDeployments: workerDestinations,
             emceeVersion: emceeVersion,
-            metricRecorder: try di.get(),
+            logger: logger,
+            globalMetricRecorder: try di.get(),
             queueHost: socketHost
         )
         
         let workersToUtilizeService = DefaultWorkersToUtilizeService(
-            cache: DefaultWorkersMappingCache(cacheIvalidationTime: 300, dateProvider: try di.get()),
-            calculator: DefaultWorkersToUtilizeCalculator(),
+            cache: DefaultWorkersMappingCache(
+                cacheIvalidationTime: 300,
+                dateProvider: try di.get(),
+                logger: logger
+            ),
+            calculator: DefaultWorkersToUtilizeCalculator(logger: logger),
             communicationService: queueCommunicationService,
+            logger: logger,
             portDeterminer: remotePortDeterminer
         )
         
         let remoteWorkerStarterProvider = DefaultRemoteWorkerStarterProvider(
             emceeVersion: emceeVersion,
+            logger: logger,
             processControllerProvider: try di.get(),
             tempFolder: try TemporaryFolder(),
             uniqueIdentifierGenerator: try di.get(),
@@ -132,8 +151,13 @@ public final class StartQueueServerCommand: Command {
             dateProvider: try di.get(),
             deploymentDestinations: workerDestinations,
             emceeVersion: emceeVersion,
-            localPortDeterminer: LocalPortDeterminer(portRange: EmceePorts.defaultQueuePortRange),
-            metricRecorder: try di.get(),
+            localPortDeterminer: LocalPortDeterminer(
+                logger: logger,
+                portRange: EmceePorts.defaultQueuePortRange
+            ),
+            logger: logger,
+            globalMetricRecorder: try di.get(),
+            specificMetricRecorderProvider: try di.get(),
             onDemandWorkerStarter: OnDemandWorkerStarterViaDeployer(
                 queueServerPortProvider: queueServerPortProvider,
                 remoteWorkerStarterProvider: remoteWorkerStarterProvider
@@ -146,6 +170,7 @@ public final class StartQueueServerCommand: Command {
             uniqueIdentifierGenerator: try di.get(),
             workerAlivenessProvider: WorkerAlivenessProviderImpl(
                 knownWorkerIds: workerConfigurations.workerIds,
+                logger: logger,
                 workerPermissionProvider: workerUtilizationStatusPoller
             ),
             workerCapabilitiesStorage: WorkerCapabilitiesStorageImpl(),
@@ -157,6 +182,7 @@ public final class StartQueueServerCommand: Command {
         
         let pollPeriod: TimeInterval = 5.0
         let queueServerTerminationWaiter = QueueServerTerminationWaiterImpl(
+            logger: logger,
             pollInterval: pollPeriod,
             queueServerTerminationPolicy: queueServerConfiguration.queueServerTerminationPolicy
         )
@@ -164,6 +190,7 @@ public final class StartQueueServerCommand: Command {
         let localQueueServerRunner = LocalQueueServerRunner(
             automaticTerminationController: automaticTerminationController,
             deployQueue: deployQueue,
+            logger: logger,
             newWorkerRegistrationTimeAllowance: 360.0,
             pollPeriod: pollPeriod,
             queueServer: queueServer,

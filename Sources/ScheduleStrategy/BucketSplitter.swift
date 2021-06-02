@@ -1,5 +1,5 @@
 import Foundation
-import Logging
+import EmceeLogging
 import QueueModels
 import UniqueIdentifierGenerator
 
@@ -39,7 +39,7 @@ public class BucketSplitter: Splitter, CustomStringConvertible {
     }
     
     open func split(inputs: [TestEntryConfiguration], bucketSplitInfo: BucketSplitInfo) -> [[TestEntryConfiguration]] {
-        Logger.fatal("BucketSplitter cannot be used, you must use subclass")
+        fatalError("BucketSplitter cannot be used directly, you must use subclass")
     }
     
     open func map(chunk: [TestEntryConfiguration], bucketSplitInfo: BucketSplitInfo) -> [Bucket] {
@@ -48,6 +48,7 @@ public class BucketSplitter: Splitter, CustomStringConvertible {
         return groups.compactMap { (group: [TestEntryConfiguration]) -> Bucket? in
             guard let entry = group.first else { return nil }
             return Bucket(
+                analyticsConfiguration: entry.analyticsConfiguration,
                 bucketId: BucketId(value: uniqueIdentifierGenerator.generate()),
                 buildArtifacts: entry.buildArtifacts,
                 developerDir: entry.developerDir,
@@ -61,8 +62,7 @@ public class BucketSplitter: Splitter, CustomStringConvertible {
                 testRunnerTool: entry.testRunnerTool,
                 testTimeoutConfiguration: entry.testTimeoutConfiguration,
                 testType: entry.testType,
-                workerCapabilityRequirements: entry.workerCapabilityRequirements,
-                persistentMetricsJobId: entry.persistentMetricsJobId
+                workerCapabilityRequirements: entry.workerCapabilityRequirements
             )
         }
     }

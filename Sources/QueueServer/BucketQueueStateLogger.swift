@@ -1,23 +1,30 @@
 import Foundation
-import Logging
+import EmceeLogging
 import QueueModels
 
 public final class BucketQueueStateLogger {
     private let runningQueueState: RunningQueueState
+    private let logger: ContextualLogger
     
-    public init(runningQueueState: RunningQueueState) {
+    public init(
+        runningQueueState: RunningQueueState,
+        logger: ContextualLogger
+    ) {
         self.runningQueueState = runningQueueState
+        self.logger = logger
     }
     
-    public func logQueueSize() {
+    public func printQueueSize() {
         let dequeuedTests = runningQueueState.dequeuedTests.asDictionary
         
         for workerId in Array(dequeuedTests.keys).sorted() {
             if let testsOnWorker = dequeuedTests[workerId] {
-                Logger.info("\(workerId.value) is executing \(testsOnWorker.map { $0.stringValue }.sorted().joined(separator: ", "))")
+                print("\(workerId.value) is executing \(testsOnWorker.map { $0.stringValue }.sorted().joined(separator: ", "))")
             }
         }
 
-        Logger.info("Enqueued tests: \(runningQueueState.enqueuedTests.count), running tests: \(runningQueueState.dequeuedTests.flattenValues.count)")
+        logger
+            .skippingKibana
+            .info("Enqueued tests: \(runningQueueState.enqueuedTests.count), running tests: \(runningQueueState.dequeuedTests.flattenValues.count)")
     }
 }

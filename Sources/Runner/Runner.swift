@@ -6,8 +6,9 @@ import EventBus
 import FileSystem
 import Foundation
 import LocalHostDeterminer
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import PathLib
 import PluginManager
 import ProcessController
@@ -16,54 +17,62 @@ import ResourceLocationResolver
 import RunnerModels
 import SimulatorPoolModels
 import SynchronousWaiter
-import TemporaryStuff
 import TestsWorkingDirectorySupport
+import Tmp
+import UniqueIdentifierGenerator
 
 public final class Runner {
     private let configuration: RunnerConfiguration
     private let dateProvider: DateProvider
     private let developerDirLocator: DeveloperDirLocator
     private let fileSystem: FileSystem
-    private let metricReportingTestRunnerStream: MetricReportingTestRunnerStream
+    private let logger: ContextualLogger
+    private let persistentMetricsJobId: String?
     private let pluginEventBusProvider: PluginEventBusProvider
     private let pluginTearDownQueue = OperationQueue()
     private let resourceLocationResolver: ResourceLocationResolver
+    private let specificMetricRecorder: SpecificMetricRecorder
     private let tempFolder: TemporaryFolder
     private let testRunnerProvider: TestRunnerProvider
     private let testTimeoutCheckInterval: DispatchTimeInterval
+    private let uniqueIdentifierGenerator: UniqueIdentifierGenerator
+    private let version: Version
     private let waiter: Waiter
+    
+    public static let skipReviveAttemptsEnvName = "EMCEE_SKIP_REVIVE_ATTEMPTS"
+    public static let logCapturingModeEnvName = "EMCEE_LOG_CAPTURE_MODE"
     
     public init(
         configuration: RunnerConfiguration,
         dateProvider: DateProvider,
         developerDirLocator: DeveloperDirLocator,
         fileSystem: FileSystem,
+        logger: ContextualLogger,
+        persistentMetricsJobId: String?,
         pluginEventBusProvider: PluginEventBusProvider,
         resourceLocationResolver: ResourceLocationResolver,
+        specificMetricRecorder: SpecificMetricRecorder,
         tempFolder: TemporaryFolder,
         testRunnerProvider: TestRunnerProvider,
         testTimeoutCheckInterval: DispatchTimeInterval = .seconds(1),
+        uniqueIdentifierGenerator: UniqueIdentifierGenerator,
         version: Version,
-        persistentMetricsJobId: String,
-        metricRecorder: MetricRecorder,
         waiter: Waiter
     ) {
         self.configuration = configuration
         self.dateProvider = dateProvider
         self.developerDirLocator = developerDirLocator
         self.fileSystem = fileSystem
-        self.metricReportingTestRunnerStream = MetricReportingTestRunnerStream(
-            dateProvider: dateProvider,
-            version: version,
-            host: LocalHostDeterminer.currentHostAddress,
-            persistentMetricsJobId: persistentMetricsJobId,
-            metricRecorder: metricRecorder
-        )
+        self.logger = logger
+        self.persistentMetricsJobId = persistentMetricsJobId
         self.pluginEventBusProvider = pluginEventBusProvider
         self.resourceLocationResolver = resourceLocationResolver
+        self.specificMetricRecorder = specificMetricRecorder
         self.tempFolder = tempFolder
         self.testRunnerProvider = testRunnerProvider
         self.testTimeoutCheckInterval = testTimeoutCheckInterval
+        self.uniqueIdentifierGenerator = uniqueIdentifierGenerator
+        self.version = version
         self.waiter = waiter
     }
     
@@ -76,8 +85,7 @@ public final class Runner {
         if entries.isEmpty {
             return RunnerRunResult(
                 entriesToRun: entries,
-                testEntryResults: [],
-                subprocessStandardStreamsCaptureConfig: nil
+                testEntryResults: []
             )
         }
         
@@ -87,32 +95,34 @@ public final class Runner {
         // It is unlikely that multiple revives would provide any results, so we leave only a single retry.
         let numberOfAttemptsToRevive = 1
         
-        // Something may crash (fbxctest/xctest), many tests may be not started. Some external code that uses Runner
+        // Something may crash (xcodebuild/xctest), many tests may be not started. Some external code that uses Runner
         // may have its own logic for restarting particular tests, but here at Runner we deal with crashes of bunches
         // of tests, many of which can be even not started. Simplifying this: if something that runs tests is crashed,
         // we should retry running tests more than if some test fails. External code will treat failed tests as it
         // is promblem in them, not in infrastructure.
         
         var reviveAttempt = 0
-        var lastSubprocessStandardStreamsCaptureConfig: StandardStreamsCaptureConfig? = nil
+        
+        let lostTestProcessingMode: LostTestProcessingMode = configuration.environment[Self.skipReviveAttemptsEnvName] == "true" ? .reportError : .reportLost
+
         while runResult.nonLostTestEntryResults.count < entries.count, reviveAttempt <= numberOfAttemptsToRevive {
-            let entriesToRun = missingEntriesForScheduledEntries(
+            let missingEntriesToRun = missingEntriesForScheduledEntries(
                 expectedEntriesToRun: entries,
                 collectedResults: runResult
             )
             let runResults = try runOnce(
-                entriesToRun: entriesToRun,
+                entriesToRun: missingEntriesToRun,
                 developerDir: developerDir,
-                simulator: simulator
+                simulator: simulator,
+                lostTestProcessingMode: reviveAttempt == numberOfAttemptsToRevive ? .reportError : lostTestProcessingMode
             )
-            lastSubprocessStandardStreamsCaptureConfig = runResults.subprocessStandardStreamsCaptureConfig
             
             runResult.append(testEntryResults: runResults.testEntryResults)
             
             if runResults.testEntryResults.filter({ !$0.isLost }).isEmpty {
                 // Here, if we do not receive events at all, we will get 0 results. We try to revive a limited number of times.
                 reviveAttempt += 1
-                Logger.warning("Got no results. Attempting to revive #\(reviveAttempt) out of allowed \(numberOfAttemptsToRevive) attempts to revive")
+                logger.warning("Got no results. Attempting to revive #\(reviveAttempt) out of allowed \(numberOfAttemptsToRevive) attempts to revive")
             } else {
                 // Here, we actually got events, so we could reset revive attempts.
                 reviveAttempt = 0
@@ -121,11 +131,7 @@ public final class Runner {
         
         return RunnerRunResult(
             entriesToRun: entries,
-            testEntryResults: testEntryResults(
-                runResult: runResult,
-                simulatorId: simulator.udid
-            ),
-            subprocessStandardStreamsCaptureConfig: lastSubprocessStandardStreamsCaptureConfig
+            testEntryResults: runResult.testEntryResults
         )
     }
     
@@ -133,23 +139,34 @@ public final class Runner {
     public func runOnce(
         entriesToRun: [TestEntry],
         developerDir: DeveloperDir,
-        simulator: Simulator
+        simulator: Simulator,
+        lostTestProcessingMode: LostTestProcessingMode
     ) throws -> RunnerRunResult {
         if entriesToRun.isEmpty {
-            Logger.info("Nothing to run!")
             return RunnerRunResult(
                 entriesToRun: entriesToRun,
-                testEntryResults: [],
-                subprocessStandardStreamsCaptureConfig: nil
+                testEntryResults: []
             )
         }
+        
+        let logCapturingMode = LogCapturingMode(rawValue: configuration.environment[Self.logCapturingModeEnvName] ?? LogCapturingMode.noLogs.rawValue) ?? .noLogs
 
         var collectedTestStoppedEvents = [TestStoppedEvent]()
         var collectedTestExceptions = [TestException]()
+        var collectedLogs = [TestLogEntry]()
         
         let testContext = try createTestContext(
             developerDir: developerDir,
             simulator: simulator
+        )
+        
+        let runnerWasteCollector: RunnerWasteCollector = RunnerWasteCollectorImpl()
+        runnerWasteCollector.scheduleCollection(path: testContext.testsWorkingDirectory)
+        runnerWasteCollector.scheduleCollection(path: simulator.path.appending(relativePath: "data/Library/Caches/com.apple.containermanagerd/Dead"))
+        
+        let runnerResultsPreparer = RunnerResultsPreparerImpl(
+            dateProvider: dateProvider,
+            lostTestProcessingMode: lostTestProcessingMode
         )
         
         let eventBus = try pluginEventBusProvider.createEventBus(
@@ -157,15 +174,22 @@ public final class Runner {
             pluginLocations: configuration.pluginLocations
         )
         defer {
-            pluginTearDownQueue.addOperation(eventBus.tearDown)
+            pluginTearDownQueue.addOperation { [fileSystem] in
+                eventBus.tearDown()
+                RunnerWasteCleanerImpl(fileSystem: fileSystem).cleanWaste(runnerWasteCollector: runnerWasteCollector)
+            }
         }
         
-        Logger.debug("Will run \(entriesToRun.count) tests on simulator \(simulator)")
+        var logger = self.logger
+        logger.debug("Will run \(entriesToRun.count) tests on simulator \(simulator)")
         
         let singleTestMaximumDuration = configuration.testTimeoutConfiguration.singleTestMaximumDuration
         
-        let testRunner = try testRunnerProvider.testRunner(
-            testRunnerTool: configuration.testRunnerTool
+        let testRunner = FailureReportingTestRunnerProxy(
+            dateProvider: dateProvider,
+            testRunner: try testRunnerProvider.testRunner(
+                testRunnerTool: configuration.testRunnerTool
+            )
         )
         
         let testRunnerRunningInvocationContainer = AtomicValue<TestRunnerRunningInvocation?>(nil)
@@ -176,10 +200,13 @@ public final class Runner {
                 EventBusReportingTestRunnerStream(
                     entriesToRun: entriesToRun,
                     eventBus: eventBus,
+                    logger: { logger },
                     testContext: testContext,
                     resultsProvider: {
-                        Runner.prepareResults(
+                        runnerResultsPreparer.prepareResults(
                             collectedTestStoppedEvents: collectedTestStoppedEvents,
+                            collectedTestExceptions: collectedTestExceptions,
+                            collectedLogs: collectedLogs,
                             requestedEntriesToRun: entriesToRun,
                             simulatorId: simulator.udid
                         )
@@ -188,7 +215,7 @@ public final class Runner {
                 TestTimeoutTrackingTestRunnerSream(
                     dateProvider: dateProvider,
                     detectedLongRunningTest: { [dateProvider] testName, testStartedAt in
-                        Logger.debug("Detected long running test \(testName)", testRunnerRunningInvocationContainer.currentValue()?.subprocessInfo)
+                        logger.debug("Detected long running test \(testName)")
                         collectedTestStoppedEvents.append(
                             TestStoppedEvent(
                                 testName: testName,
@@ -197,230 +224,146 @@ public final class Runner {
                                 testExceptions: [
                                     RunnerConstants.testTimeout(singleTestMaximumDuration).testException
                                 ],
+                                logs: collectedLogs,
                                 testStartTimestamp: testStartedAt.timeIntervalSince1970
                             )
                         )
                         
                         testRunnerRunningInvocationContainer.currentValue()?.cancel()
                     },
+                    logger: { logger },
                     maximumTestDuration: singleTestMaximumDuration,
                     pollPeriod: testTimeoutCheckInterval
                 ),
-                metricReportingTestRunnerStream,
+                MetricReportingTestRunnerStream(
+                    dateProvider: dateProvider,
+                    version: version,
+                    host: LocalHostDeterminer.currentHostAddress,
+                    persistentMetricsJobId: persistentMetricsJobId,
+                    specificMetricRecorder: specificMetricRecorder
+                ),
                 TestRunnerStreamWrapper(
                     onOpenStream: {
-                        Logger.debug("Started executing tests", testRunnerRunningInvocationContainer.currentValue()?.subprocessInfo)
+                        logger.debug("Started executing tests")
                     },
                     onTestStarted: { testName in
-                        collectedTestExceptions = []
-                        Logger.debug("Test started: \(testName)", testRunnerRunningInvocationContainer.currentValue()?.subprocessInfo)
+                        logger.debug("Test started: \(testName)")
                     },
                     onTestException: { testException in
                         collectedTestExceptions.append(testException)
-                        Logger.debug("Caught test exception: \(testException)", testRunnerRunningInvocationContainer.currentValue()?.subprocessInfo)
+                    },
+                    onLog: { logEntry in
+                        switch logCapturingMode {
+                        case .noLogs:
+                            break
+                        case .allLogs:
+                            collectedLogs.append(logEntry)
+                        case .onlyCrashLogs:
+                            if logEntry.contents.contains("Process:") && logEntry.contents.contains("Crashed Thread:") {
+                                collectedLogs.append(logEntry)
+                            }
+                        }
+                        
                     },
                     onTestStopped: { testStoppedEvent in
-                        let testStoppedEvent = testStoppedEvent.byMergingTestExceptions(testExceptions: collectedTestExceptions)
+                        let testStoppedEvent = testStoppedEvent.byMerging(testExceptions: collectedTestExceptions, logs: collectedLogs)
                         collectedTestStoppedEvents.append(testStoppedEvent)
                         collectedTestExceptions = []
-                        Logger.debug("Test stopped: \(testStoppedEvent.testName), \(testStoppedEvent.result)", testRunnerRunningInvocationContainer.currentValue()?.subprocessInfo)
+                        collectedLogs = []
+                        logger.debug("Test stopped: \(testStoppedEvent.testName), \(testStoppedEvent.result)")
                     },
                     onCloseStream: {
-                        Logger.debug("Finished executing tests", testRunnerRunningInvocationContainer.currentValue()?.subprocessInfo)
+                        logger.debug("Finished executing tests")
                         streamClosedCallback.set(result: ())
                     }
                 ),
+                PreflightPostflightTimeoutTrackingTestRunnerStream(
+                    dateProvider: dateProvider,
+                    onPreflightTimeout: {
+                        logger.debug("Detected preflight timeout")
+                        testRunnerRunningInvocationContainer.currentValue()?.cancel()
+                    },
+                    onPostflightTimeout: { testName in
+                        logger.debug("Detected postflight timeout, last finished test was \(testName)")
+                        testRunnerRunningInvocationContainer.currentValue()?.cancel()
+                    },
+                    maximumPreflightDuration: configuration.testTimeoutConfiguration.testRunnerMaximumSilenceDuration,
+                    maximumPostflightDuration: configuration.testTimeoutConfiguration.testRunnerMaximumSilenceDuration,
+                    pollPeriod: testTimeoutCheckInterval
+                )
             ]
         )
         
-        let testRunnerInvocation = runTestsViaTestRunner(
-            testRunner: testRunner,
+        let runningInvocation = try testRunner.prepareTestRun(
+            buildArtifacts: configuration.buildArtifacts,
+            developerDirLocator: developerDirLocator,
             entriesToRun: entriesToRun,
+            logger: logger,
+            runnerWasteCollector: runnerWasteCollector,
             simulator: simulator,
+            temporaryFolder: tempFolder,
             testContext: testContext,
-            testRunnerStream: testRunnerStream
-        )
-        let runningInvocation = testRunnerInvocation.startExecutingTests()
+            testRunnerStream: testRunnerStream,
+            testType: configuration.testType
+        ).startExecutingTests()
+        
+        logger = logger
+            .withMetadata(key: .subprocessId, value: "\(runningInvocation.pidInfo.pid)")
+            .withMetadata(key: .subprocessName, value: "\(runningInvocation.pidInfo.name)")
         testRunnerRunningInvocationContainer.set(runningInvocation)
-        
-        let runnerSilenceTracker = ProcessOutputSilenceTracker(
-            dateProvider: dateProvider,
-            fileSystem: fileSystem,
-            onSilence: { [configuration] in
-                Logger.debug("Test runner has been silent for too long (\(LoggableDuration(configuration.testTimeoutConfiguration.testRunnerMaximumSilenceDuration))), terminating tests", runningInvocation.subprocessInfo)
-                runningInvocation.cancel()
-            },
-            silenceDuration: configuration.testTimeoutConfiguration.testRunnerMaximumSilenceDuration,
-            standardStreamsCaptureConfig: runningInvocation.output,
-            subprocessInfo: runningInvocation.subprocessInfo
-        )
-        try runnerSilenceTracker.whileTracking {
-            try streamClosedCallback.wait(timeout: .infinity, description: "Test Runner Stream Close")
+        defer {
+            // since we refer this in closures, we must clean up to ensure no retain cycles will occur
+            testRunnerRunningInvocationContainer.set(nil)
         }
+        try streamClosedCallback.wait(timeout: .infinity, description: "Test Runner Stream Close")
         
-        let result = Runner.prepareResults(
+        let result = runnerResultsPreparer.prepareResults(
             collectedTestStoppedEvents: collectedTestStoppedEvents,
+            collectedTestExceptions: collectedTestExceptions,
+            collectedLogs: collectedLogs,
             requestedEntriesToRun: entriesToRun,
             simulatorId: simulator.udid
         )
         
-        Logger.debug("Attempted to run \(entriesToRun.count) tests on simulator \(simulator): \(entriesToRun)", runningInvocation.subprocessInfo)
-        Logger.debug("Did get \(result.count) results: \(result)", runningInvocation.subprocessInfo)
+        logger.debug("Attempted to run \(entriesToRun.count) tests on simulator \(simulator): \(entriesToRun)")
+        logger.debug("Did get \(result.count) results: \(result)")
         
         return RunnerRunResult(
             entriesToRun: entriesToRun,
-            testEntryResults: result,
-            subprocessStandardStreamsCaptureConfig: runningInvocation.output
+            testEntryResults: result
         )
+    }
+    
+    public enum LogCapturingMode: String, Equatable {
+        case allLogs
+        case onlyCrashLogs
+        case noLogs
     }
     
     private func createTestContext(
         developerDir: DeveloperDir,
         simulator: Simulator
     ) throws -> TestContext {
-        let contextUuid = UUID()
+        let contextId = uniqueIdentifierGenerator.generate()
         let testsWorkingDirectory = try tempFolder.pathByCreatingDirectories(
-            components: ["testsWorkingDir", contextUuid.uuidString]
+            components: ["testsWorkingDir", contextId]
         )
-        let testResultDirectory = try tempFolder.pathByCreatingDirectories(components: [contextUuid.uuidString])
 
+        let testResultDirectory = try tempFolder.pathByCreatingDirectories(components: [contextUuid.uuidString])
         var environment = configuration.environment
         environment[TestsWorkingDirectorySupport.envTestsWorkingDirectory] = testsWorkingDirectory.pathString
         environment = try developerDirLocator.suitableEnvironment(forDeveloperDir: developerDir, byUpdatingEnvironment: environment)
         environment["XCRESULT_PATH"] = testResultDirectory.pathString.appending("/resultBundle.xcresult")
-
+        
         return TestContext(
-            contextUuid: contextUuid,
+            contextId: contextId,
             developerDir: developerDir,
             environment: environment,
-            simulatorPath: simulator.path.fileUrl,
+            simulatorPath: simulator.path,
             simulatorUdid: simulator.udid,
-            testDestination: simulator.testDestination
+            testDestination: simulator.testDestination,
+            testsWorkingDirectory: testsWorkingDirectory
         )
-    }
-    
-    private func runTestsViaTestRunner(
-        testRunner: TestRunner,
-        entriesToRun: [TestEntry],
-        simulator: Simulator,
-        testContext: TestContext,
-        testRunnerStream: TestRunnerStream
-    ) -> TestRunnerInvocation {
-        cleanUpDeadCache(simulator: simulator)
-        do {
-            return try testRunner.prepareTestRun(
-                buildArtifacts: configuration.buildArtifacts,
-                developerDirLocator: developerDirLocator,
-                entriesToRun: entriesToRun,
-                simulator: simulator,
-                temporaryFolder: tempFolder,
-                testContext: testContext,
-                testRunnerStream: testRunnerStream,
-                testType: configuration.testType
-            )
-        } catch {
-            return generateTestFailuresBecauseOfRunnerFailure(
-                runnerError: error,
-                entriesToRun: entriesToRun,
-                testRunnerStream: testRunnerStream
-            )
-        }
-    }
-    
-    private func cleanUpDeadCache(simulator: Simulator) {
-        let deadCachePath = simulator.path.appending(relativePath: RelativePath("data/Library/Caches/com.apple.containermanagerd/Dead"))
-        do {
-            if try fileSystem.properties(forFileAtPath: deadCachePath).exists() {
-                Logger.debug("Will attempt to clean up simulator dead cache at: \(deadCachePath)")
-                try fileSystem.delete(fileAtPath: deadCachePath)
-            }
-        } catch {
-            Logger.warning("Failed to delete dead cache at \(deadCachePath): \(error)")
-        }
-    }
-    
-    private func generateTestFailuresBecauseOfRunnerFailure(
-        runnerError: Error,
-        entriesToRun: [TestEntry],
-        testRunnerStream: TestRunnerStream
-    ) -> TestRunnerInvocation {
-        testRunnerStream.openStream()
-        for testEntry in entriesToRun {
-            testRunnerStream.testStarted(testName: testEntry.testName)
-            testRunnerStream.testStopped(
-                testStoppedEvent: TestStoppedEvent(
-                    testName: testEntry.testName,
-                    result: .lost,
-                    testDuration: 0,
-                    testExceptions: [
-                        RunnerConstants.failedToStartTestRunner(runnerError).testException
-                    ],
-                    testStartTimestamp: dateProvider.currentDate().timeIntervalSince1970
-                )
-            )
-        }
-        testRunnerStream.closeStream()
-        return NoOpTestRunnerInvocation()
-    }
-    
-    private static func prepareResults(
-        collectedTestStoppedEvents: [TestStoppedEvent],
-        requestedEntriesToRun: [TestEntry],
-        simulatorId: UDID
-    ) -> [TestEntryResult] {
-        return requestedEntriesToRun.map { requestedEntryToRun in
-            prepareResult(
-                requestedEntryToRun: requestedEntryToRun,
-                simulatorId: simulatorId,
-                collectedTestStoppedEvents: collectedTestStoppedEvents
-            )
-        }
-    }
-    
-    private static func prepareResult(
-        requestedEntryToRun: TestEntry,
-        simulatorId: UDID,
-        collectedTestStoppedEvents: [TestStoppedEvent]
-    ) -> TestEntryResult {
-        let correspondingTestStoppedEvents = testStoppedEvents(
-            testName: requestedEntryToRun.testName,
-            collectedTestStoppedEvents: collectedTestStoppedEvents
-        )
-        return testEntryResultForFinishedTest(
-            simulatorId: simulatorId,
-            testEntry: requestedEntryToRun,
-            testStoppedEvents: correspondingTestStoppedEvents
-        )
-    }
-    
-    private static func testEntryResultForFinishedTest(
-        simulatorId: UDID,
-        testEntry: TestEntry,
-        testStoppedEvents: [TestStoppedEvent]
-    ) -> TestEntryResult {
-        guard !testStoppedEvents.isEmpty else {
-            return .lost(testEntry: testEntry)
-        }
-        return TestEntryResult.withResults(
-            testEntry: testEntry,
-            testRunResults: testStoppedEvents.map { testStoppedEvent -> TestRunResult in
-                TestRunResult(
-                    succeeded: testStoppedEvent.succeeded,
-                    exceptions: testStoppedEvent.testExceptions,
-                    duration: testStoppedEvent.testDuration,
-                    startTime: testStoppedEvent.testStartTimestamp,
-                    hostName: LocalHostDeterminer.currentHostAddress,
-                    simulatorId: simulatorId
-                )
-            }
-        )
-    }
-    
-    private static func testStoppedEvents(
-        testName: TestName,
-        collectedTestStoppedEvents: [TestStoppedEvent]
-    ) -> [TestStoppedEvent] {
-        return collectedTestStoppedEvents.filter { $0.testName == testName }
     }
     
     private func missingEntriesForScheduledEntries(
@@ -431,67 +374,4 @@ public final class Runner {
         let receivedTestEntries = Set(collectedResults.nonLostTestEntryResults.map { $0.testEntry })
         return expectedEntriesToRun.filter { !receivedTestEntries.contains($0) }
     }
-    
-    private func testEntryResults(
-        runResult: RunResult,
-        simulatorId: UDID
-    ) -> [TestEntryResult] {
-        return runResult.testEntryResults.map {
-            if $0.isLost {
-                return resultForSingleTestThatDidNotRun(
-                    simulatorId: simulatorId,
-                    testEntry: $0.testEntry
-                )
-            } else {
-                return $0
-            }
-        }
-    }
-    
-    private func resultForSingleTestThatDidNotRun(
-        simulatorId: UDID,
-        testEntry: TestEntry
-    ) -> TestEntryResult {
-        return .withResult(
-            testEntry: testEntry,
-            testRunResult: TestRunResult(
-                succeeded: false,
-                exceptions: [
-                    RunnerConstants.testDidNotRun(testEntry.testName).testException
-                ],
-                duration: 0,
-                startTime: dateProvider.currentDate().timeIntervalSince1970,
-                hostName: LocalHostDeterminer.currentHostAddress,
-                simulatorId: simulatorId
-            )
-        )
-    }
-}
-
-private extension TestStoppedEvent {
-    func byMergingTestExceptions(
-        testExceptions: [TestException]
-    ) -> TestStoppedEvent {
-        return TestStoppedEvent(
-            testName: testName,
-            result: result,
-            testDuration: testDuration,
-            testExceptions: testExceptions + self.testExceptions,
-            testStartTimestamp: testStartTimestamp
-        )
-    }
-}
-
-private class NoOpTestRunnerInvocation: TestRunnerInvocation {
-    private class NoOpTestRunnerRunningInvocation: TestRunnerRunningInvocation {
-        init() {}
-        let output = StandardStreamsCaptureConfig()
-        let subprocessInfo = SubprocessInfo(subprocessId: 0, subprocessName: "no-op process")
-        func cancel() {}
-        func wait() {}
-    }
-    
-    init() {}
-    
-    func startExecutingTests() -> TestRunnerRunningInvocation { NoOpTestRunnerRunningInvocation() }
 }

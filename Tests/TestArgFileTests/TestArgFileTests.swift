@@ -1,9 +1,9 @@
 import BuildArtifacts
 import Foundation
 import LoggingSetup
+import MetricsExtensions
 import QueueModels
 import ResourceLocation
-import Sentry
 import SimulatorPoolModels
 import SocketModels
 import TestArgFile
@@ -20,7 +20,6 @@ final class TestArgFileTests: XCTestCase {
                 "jobId": "jobId",
                 "jobPriority": 500,
                 "testDestinationConfigurations": [],
-                "persistentMetricsJobId": "persistentMetricsJobId",
                 "analyticsConfiguration": {
                     "graphiteConfiguration": {
                         "socketAddress": "graphite.host:123",
@@ -30,8 +29,15 @@ final class TestArgFileTests: XCTestCase {
                         "socketAddress": "statsd.host:124",
                         "metricPrefix": "statsd.prefix",
                     },
-                    "sentryConfiguration": {
-                        "dsn": "http://example.com",
+                    "kibanaConfiguration": {
+                        "endpoints": [
+                            "http://kibana.example.com:9200"
+                        ],
+                        "indexPattern": "index-pattern"
+                    },
+                    "persistentMetricsJobId": "persistentMetricsJobId",
+                    "metadata": {
+                        "some": "value"
                     }
                 }
             }
@@ -45,24 +51,30 @@ final class TestArgFileTests: XCTestCase {
         XCTAssertEqual(
             testArgFile,
             TestArgFile(
-                analyticsConfiguration: AnalyticsConfiguration(
-                    graphiteConfiguration: MetricConfiguration(
-                        socketAddress: SocketAddress(host: "graphite.host", port: 123),
-                        metricPrefix: "graphite.prefix"
-                    ),
-                    statsdConfiguration: MetricConfiguration(
-                        socketAddress: SocketAddress(host: "statsd.host", port: 124),
-                        metricPrefix: "statsd.prefix"
-                    ),
-                    sentryConfiguration: SentryConfiguration(dsn: URL(string: "http://example.com")!)
-                ),
                 entries: [],
                 prioritizedJob: PrioritizedJob(
+                    analyticsConfiguration: AnalyticsConfiguration(
+                        graphiteConfiguration: MetricConfiguration(
+                            socketAddress: SocketAddress(host: "graphite.host", port: 123),
+                            metricPrefix: "graphite.prefix"
+                        ),
+                        statsdConfiguration: MetricConfiguration(
+                            socketAddress: SocketAddress(host: "statsd.host", port: 124),
+                            metricPrefix: "statsd.prefix"
+                        ),
+                        kibanaConfiguration: KibanaConfiguration(
+                            endpoints: [
+                                URL(string: "http://kibana.example.com:9200")!
+                            ],
+                            indexPattern: "index-pattern"
+                        ),
+                        persistentMetricsJobId: "persistentMetricsJobId",
+                        metadata: ["some": "value"]
+                    ),
                     jobGroupId: "jobGroupId",
                     jobGroupPriority: 100,
                     jobId: "jobId",
-                    jobPriority: 500,
-                    persistentMetricsJobId: "persistentMetricsJobId"
+                    jobPriority: 500
                 ),
                 testDestinationConfigurations: []
             )
@@ -86,14 +98,13 @@ final class TestArgFileTests: XCTestCase {
         XCTAssertEqual(
             testArgFile,
             TestArgFile(
-                analyticsConfiguration: TestArgFileDefaultValues.analyticsConfiguration,
                 entries: [],
                 prioritizedJob: PrioritizedJob(
+                    analyticsConfiguration: TestArgFileDefaultValues.analyticsConfiguration,
                     jobGroupId: "jobId",
                     jobGroupPriority: TestArgFileDefaultValues.priority,
                     jobId: "jobId",
-                    jobPriority: TestArgFileDefaultValues.priority,
-                    persistentMetricsJobId: TestArgFileDefaultValues.persistentMetricsJobId
+                    jobPriority: TestArgFileDefaultValues.priority
                 ),
                 testDestinationConfigurations: []
             )

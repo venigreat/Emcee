@@ -1,15 +1,17 @@
 import Deployer
+import EmceeLogging
 import Foundation
 import PathLib
 import ProcessController
 import QueueModels
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 public final class RemoteQueueStarter {
     private let deploymentId: String
     private let deploymentDestination: DeploymentDestination
     private let emceeVersion: Version
+    private let logger: ContextualLogger
     private let processControllerProvider: ProcessControllerProvider
     private let queueServerConfigurationLocation: QueueServerConfigurationLocation
     private let tempFolder: TemporaryFolder
@@ -19,6 +21,7 @@ public final class RemoteQueueStarter {
         deploymentId: String,
         deploymentDestination: DeploymentDestination,
         emceeVersion: Version,
+        logger: ContextualLogger,
         processControllerProvider: ProcessControllerProvider,
         queueServerConfigurationLocation: QueueServerConfigurationLocation,
         tempFolder: TemporaryFolder,
@@ -27,6 +30,7 @@ public final class RemoteQueueStarter {
         self.deploymentId = deploymentId
         self.deploymentDestination = deploymentDestination
         self.emceeVersion = emceeVersion
+        self.logger = logger
         self.processControllerProvider = processControllerProvider
         self.queueServerConfigurationLocation = queueServerConfigurationLocation
         self.tempFolder = tempFolder
@@ -81,6 +85,7 @@ public final class RemoteQueueStarter {
                 launchctlDeployableCommands.forceUnloadFromBackgroundCommand(),
                 launchctlDeployableCommands.forceLoadInBackgroundCommand()
             ],
+            logger: logger,
             processControllerProvider: processControllerProvider,
             tempFolder: tempFolder,
             uniqueIdentifierGenerator: uniqueIdentifierGenerator

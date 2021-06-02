@@ -8,9 +8,10 @@ import DI
 import EmceeVersion
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import LoggingSetup
 import Metrics
+import MetricsExtensions
 import PathLib
 import PluginManager
 import ProcessController
@@ -22,7 +23,7 @@ import ScheduleStrategy
 import Scheduler
 import SignalHandling
 import SimulatorPool
-import TemporaryStuff
+import Tmp
 import TestDiscovery
 import URLResource
 import UniqueIdentifierGenerator
@@ -41,7 +42,7 @@ public final class DumpCommand: Command {
     private let di: DI
     private let encoder = JSONEncoder.pretty()
     
-    public init(di: DI) {
+    public init(di: DI) throws {
         self.di = di
     }
 
@@ -58,21 +59,29 @@ public final class DumpCommand: Command {
 
         di.set(tempFolder, for: TemporaryFolder.self)
         
-        try di.get(MutableMetricRecorder.self).set(analyticsConfiguration: testArgFile.analyticsConfiguration)
-        if let sentryConfiguration = testArgFile.analyticsConfiguration.sentryConfiguration {
-            try AnalyticsSetup.setupSentry(sentryConfiguration: sentryConfiguration, emceeVersion: emceeVersion)
+        try di.get(GlobalMetricRecorder.self).set(analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration)
+        if let kibanaConfiguration = testArgFile.prioritizedJob.analyticsConfiguration.kibanaConfiguration {
+            try di.get(LoggingSetup.self).set(kibanaConfiguration: kibanaConfiguration)
         }
+        di.set(
+            try di.get(ContextualLogger.self).with(
+                analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration
+            )
+        )
+        
+        let logger = try di.get(ContextualLogger.self)
         
         let onDemandSimulatorPool = try OnDemandSimulatorPoolFactory.create(
             di: di,
+            logger: logger,
             version: emceeVersion
         )
         defer { onDemandSimulatorPool.deleteSimulators() }
         
         di.set(onDemandSimulatorPool, for: OnDemandSimulatorPool.self)
         
-        SignalHandling.addSignalHandler(signals: [.term, .int]) { signal in
-            Logger.debug("Got signal: \(signal)")
+        SignalHandling.addSignalHandler(signals: [.term, .int]) { [logger] signal in
+            logger.debug("Got signal: \(signal)")
             onDemandSimulatorPool.deleteSimulators()
         }
         
@@ -81,7 +90,8 @@ public final class DumpCommand: Command {
                 dateProvider: try di.get(),
                 developerDirLocator: try di.get(),
                 fileSystem: try di.get(),
-                metricRecorder: try di.get(),
+                globalMetricRecorder: try di.get(),
+                specificMetricRecorderProvider: try di.get(),
                 onDemandSimulatorPool: try di.get(),
                 pluginEventBusProvider: try di.get(),
                 processControllerProvider: try di.get(),
@@ -102,6 +112,7 @@ public final class DumpCommand: Command {
         )
         
         let dumpedTests = try discoverer.performTestDiscovery(
+            logger: logger,
             testArgFile: testArgFile,
             emceeVersion: emceeVersion,
             remoteCacheConfig: remoteCacheConfig
@@ -110,9 +121,9 @@ public final class DumpCommand: Command {
         do {
             let encodedResult = try encoder.encode(dumpedTests)
             try encodedResult.write(to: outputPath.fileUrl, options: [.atomic])
-            Logger.debug("Wrote run time tests dump to file \(outputPath)")
+            logger.debug("Wrote run time tests dump to file \(outputPath)")
         } catch {
-            Logger.error("Failed to write output: \(error)")
+            logger.error("Failed to write output: \(error)")
         }
     }
 }

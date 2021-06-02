@@ -1,6 +1,6 @@
 import BucketQueueModels
 import Foundation
-import Logging
+import EmceeLogging
 import QueueModels
 import UniqueIdentifierGenerator
 import WorkerAlivenessProvider
@@ -9,17 +9,20 @@ import WorkerAlivenessProvider
 public final class SingleBucketQueueStuckBucketsReenqueuer: StuckBucketsReenqueuer {
     private let bucketEnqueuer: BucketEnqueuer
     private let bucketQueueHolder: BucketQueueHolder
+    private let logger: ContextualLogger
     private let workerAlivenessProvider: WorkerAlivenessProvider
     private let uniqueIdentifierGenerator: UniqueIdentifierGenerator
     
     public init(
         bucketEnqueuer: BucketEnqueuer,
         bucketQueueHolder: BucketQueueHolder,
+        logger: ContextualLogger,
         workerAlivenessProvider: WorkerAlivenessProvider,
         uniqueIdentifierGenerator: UniqueIdentifierGenerator
     ) {
         self.bucketEnqueuer = bucketEnqueuer
         self.bucketQueueHolder = bucketQueueHolder
+        self.logger = logger
         self.workerAlivenessProvider = workerAlivenessProvider
         self.uniqueIdentifierGenerator = uniqueIdentifierGenerator
     }
@@ -54,6 +57,7 @@ public final class SingleBucketQueueStuckBucketsReenqueuer: StuckBucketsReenqueu
             let buckets = stuckBuckets.flatMap { stuckBucket in
                 stuckBucket.bucket.testEntries.map { testEntry in
                     Bucket(
+                        analyticsConfiguration: stuckBucket.bucket.analyticsConfiguration,
                         bucketId: BucketId(value: uniqueIdentifierGenerator.generate()),
                         buildArtifacts: stuckBucket.bucket.buildArtifacts,
                         developerDir: stuckBucket.bucket.developerDir,
@@ -67,22 +71,21 @@ public final class SingleBucketQueueStuckBucketsReenqueuer: StuckBucketsReenqueu
                         testRunnerTool: stuckBucket.bucket.testRunnerTool,
                         testTimeoutConfiguration: stuckBucket.bucket.testTimeoutConfiguration,
                         testType: stuckBucket.bucket.testType,
-                        workerCapabilityRequirements: stuckBucket.bucket.workerCapabilityRequirements,
-                        persistentMetricsJobId: stuckBucket.bucket.persistentMetricsJobId
+                        workerCapabilityRequirements: stuckBucket.bucket.workerCapabilityRequirements
                     )
                 }
             }
             
             if !buckets.isEmpty {
-                Logger.debug("Got \(stuckBuckets.count) stuck buckets")
+                logger.debug("Got \(stuckBuckets.count) stuck buckets")
                 do {
                     try bucketEnqueuer.enqueue(buckets: buckets)
-                    Logger.debug("Reenqueued \(stuckBuckets.count) stuck buckets as \(buckets.count) new buckets:")
+                    logger.debug("Reenqueued \(stuckBuckets.count) stuck buckets as \(buckets.count) new buckets:")
                     for bucket in buckets {
-                        Logger.debug("-- \(bucket.bucketId)")
+                        logger.debug("-- \(bucket.bucketId)")
                     }
                 } catch {
-                    Logger.error("Failed to reenqueue \(stuckBuckets.count) buckets: \(error)")
+                    logger.error("Failed to reenqueue \(stuckBuckets.count) buckets: \(error)")
                 }
             }
             

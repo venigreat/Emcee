@@ -3,8 +3,9 @@ import DateProvider
 import DeveloperDirLocator
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import PathLib
 import PluginManager
 import ProcessController
@@ -16,15 +17,16 @@ import RunnerModels
 import SimulatorPool
 import SimulatorPoolModels
 import SynchronousWaiter
-import TemporaryStuff
 import TestArgFile
+import Tmp
 import UniqueIdentifierGenerator
 
 public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
     private let dateProvider: DateProvider
     private let developerDirLocator: DeveloperDirLocator
     private let fileSystem: FileSystem
-    private let metricRecorder: MetricRecorder
+    private let globalMetricRecorder: GlobalMetricRecorder
+    private let specificMetricRecorderProvider: SpecificMetricRecorderProvider
     private let onDemandSimulatorPool: OnDemandSimulatorPool
     private let pluginEventBusProvider: PluginEventBusProvider
     private let processControllerProvider: ProcessControllerProvider
@@ -39,7 +41,8 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
         dateProvider: DateProvider,
         developerDirLocator: DeveloperDirLocator,
         fileSystem: FileSystem,
-        metricRecorder: MetricRecorder,
+        globalMetricRecorder: GlobalMetricRecorder,
+        specificMetricRecorderProvider: SpecificMetricRecorderProvider,
         onDemandSimulatorPool: OnDemandSimulatorPool,
         pluginEventBusProvider: PluginEventBusProvider,
         processControllerProvider: ProcessControllerProvider,
@@ -53,7 +56,8 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
         self.dateProvider = dateProvider
         self.developerDirLocator = developerDirLocator
         self.fileSystem = fileSystem
-        self.metricRecorder = metricRecorder
+        self.globalMetricRecorder = globalMetricRecorder
+        self.specificMetricRecorderProvider = specificMetricRecorderProvider
         self.onDemandSimulatorPool = onDemandSimulatorPool
         self.pluginEventBusProvider = pluginEventBusProvider
         self.processControllerProvider = processControllerProvider
@@ -82,14 +86,18 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
     }
 
     private func obtainDiscoveredTests(configuration: TestDiscoveryConfiguration) throws -> DiscoveredTests {
-        Logger.debug("Trying to fetch cached runtime dump entries for bundle: \(configuration.xcTestBundleLocation)")
+        let specificMetricRecorder = try specificMetricRecorderProvider.specificMetricRecorder(
+            analyticsConfiguration: configuration.analyticsConfiguration
+        )
+        
+        configuration.logger.debug("Trying to fetch cached runtime dump entries for bundle: \(configuration.xcTestBundleLocation)")
         if let cachedRuntimeTests = try? configuration.remoteCache.results(xcTestBundleLocation: configuration.xcTestBundleLocation) {
-            Logger.debug("Fetched cached runtime dump entries for test bundle \(configuration.xcTestBundleLocation): \(cachedRuntimeTests)")
+            configuration.logger.debug("Fetched cached runtime dump entries for test bundle \(configuration.xcTestBundleLocation): \(cachedRuntimeTests)")
             return cachedRuntimeTests
         }
 
-        Logger.debug("No cached runtime dump entries found for bundle: \(configuration.xcTestBundleLocation)")
-        let dumpedTests = try discoveredTests(configuration: configuration)
+        configuration.logger.debug("No cached runtime dump entries found for bundle: \(configuration.xcTestBundleLocation)")
+        let dumpedTests = try discoveredTests(configuration: configuration, specificMetricRecorder: specificMetricRecorder)
 
         try? configuration.remoteCache.store(tests: dumpedTests, xcTestBundleLocation: configuration.xcTestBundleLocation)
         return dumpedTests
@@ -97,11 +105,15 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
 
     
     private func discoveredTests(
-        configuration: TestDiscoveryConfiguration
+        configuration: TestDiscoveryConfiguration,
+        specificMetricRecorder: SpecificMetricRecorder
     ) throws -> DiscoveredTests {
         try TimeMeasurerImpl(dateProvider: dateProvider).measure(
             work: {
-                let internalTestDiscoverer = createSpecificTestDiscoverer(configuration: configuration)
+                let internalTestDiscoverer = createSpecificTestDiscoverer(
+                    configuration: configuration,
+                    specificMetricRecorder: specificMetricRecorder
+                )
                 
                 let foundTestEntries = try internalTestDiscoverer.discoverTestEntries(
                     configuration: configuration
@@ -111,15 +123,17 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
                 reportStats(
                     testCaseCount: foundTestEntries.count,
                     testCount: allTests.count,
-                    configuration: configuration
+                    configuration: configuration,
+                    specificMetricRecorder: specificMetricRecorder
                 )
                 return DiscoveredTests(tests: foundTestEntries)
             },
             result: { error, duration in
                 reportDiscoveryDuration(
-                    persistentMetricsJobId: configuration.persistentMetricsJobId,
+                    persistentMetricsJobId: configuration.analyticsConfiguration.persistentMetricsJobId,
                     duration: duration,
-                    isSuccessful: error == nil
+                    isSuccessful: error == nil,
+                    specificMetricRecorder: specificMetricRecorder
                 )
             }
         )
@@ -155,10 +169,15 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
         return testsToRunMissingInRuntime
     }
     
-    private func reportStats(testCaseCount: Int, testCount: Int, configuration: TestDiscoveryConfiguration) {
+    private func reportStats(
+        testCaseCount: Int,
+        testCount: Int,
+        configuration: TestDiscoveryConfiguration,
+        specificMetricRecorder: SpecificMetricRecorder
+    ) {
         let testBundleName = configuration.xcTestBundleLocation.resourceLocation.stringValue.lastPathComponent
-        Logger.info("Test discovery in \(configuration.xcTestBundleLocation.resourceLocation): bundle has \(testCaseCount) XCTestCases, \(testCount) tests")
-        metricRecorder.capture(
+        configuration.logger.info("Test discovery in \(configuration.xcTestBundleLocation.resourceLocation): bundle has \(testCaseCount) XCTestCases, \(testCount) tests")
+        specificMetricRecorder.capture(
             RuntimeDumpTestCountMetric(
                 testBundleName: testBundleName,
                 numberOfTests: testCount,
@@ -174,20 +193,28 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
         )
     }
     
-    private func reportDiscoveryDuration(persistentMetricsJobId: String, duration: TimeInterval, isSuccessful: Bool) {
-        metricRecorder.capture(
-            TestDiscoveryDurationMetric(
-                host: LocalHostDeterminer.currentHostAddress,
-                version: version,
-                persistentMetricsJobId: persistentMetricsJobId,
-                isSuccessful: isSuccessful,
-                duration: duration
+    private func reportDiscoveryDuration(
+        persistentMetricsJobId: String?,
+        duration: TimeInterval,
+        isSuccessful: Bool,
+        specificMetricRecorder: SpecificMetricRecorder
+    ) {
+        if let persistentMetricsJobId = persistentMetricsJobId {
+            specificMetricRecorder.capture(
+                TestDiscoveryDurationMetric(
+                    host: LocalHostDeterminer.currentHostAddress,
+                    version: version,
+                    persistentMetricsJobId: persistentMetricsJobId,
+                    isSuccessful: isSuccessful,
+                    duration: duration
+                )
             )
-        )
+        }
     }
     
     private func createSpecificTestDiscoverer(
-        configuration: TestDiscoveryConfiguration
+        configuration: TestDiscoveryConfiguration,
+        specificMetricRecorder: SpecificMetricRecorder
     ) -> SpecificTestDiscoverer {
         switch configuration.testDiscoveryMode {
         case .parseFunctionSymbols:
@@ -216,7 +243,8 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
                     )
                 ),
                 simulatorControlTool: simulatorControlTool,
-                testType: .logicTest
+                testType: .logicTest,
+                specificMetricRecorder: specificMetricRecorder
             )
         case .runtimeAppTest(let runtimeDumpApplicationTestSupport):
             return createRuntimeDumpBasedTestDiscoverer(
@@ -228,7 +256,8 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
                     )
                 ),
                 simulatorControlTool: runtimeDumpApplicationTestSupport.simulatorControlTool,
-                testType: .appTest
+                testType: .appTest,
+                specificMetricRecorder: specificMetricRecorder
             )
         }
     }
@@ -236,7 +265,8 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
     private func createRuntimeDumpBasedTestDiscoverer(
         buildArtifacts: BuildArtifacts,
         simulatorControlTool: SimulatorControlTool,
-        testType: TestType
+        testType: TestType,
+        specificMetricRecorder: SpecificMetricRecorder
     ) -> RuntimeDumpTestDiscoverer {
         RuntimeDumpTestDiscoverer(
             buildArtifacts: buildArtifacts,
@@ -254,7 +284,8 @@ public final class TestDiscoveryQuerierImpl: TestDiscoveryQuerier {
             uniqueIdentifierGenerator: uniqueIdentifierGenerator,
             version: version,
             waiter: waiter,
-            metricRecorder: metricRecorder
+            globalMetricRecorder: globalMetricRecorder,
+            specificMetricRecorder: specificMetricRecorder
         )
     }
 }

@@ -1,18 +1,17 @@
 import BuildArtifacts
 import DeveloperDirLocator
+import EmceeLogging
 import Foundation
 import ProcessController
 import Runner
 import RunnerModels
 import SimulatorPoolModels
-import TemporaryStuff
+import Tmp
 
 public final class FakeTestRunner: TestRunner {
     public var entriesToRun: [TestEntry]?
     public var errorToThrowOnRun: Error?
     private let tempFolder: TemporaryFolder
-
-    public var standardStreamsCaptureConfig = StandardStreamsCaptureConfig()
     
     public struct SomeError: Error, CustomStringConvertible {
         public let description = "some error happened"
@@ -74,6 +73,8 @@ public final class FakeTestRunner: TestRunner {
         buildArtifacts: BuildArtifacts,
         developerDirLocator: DeveloperDirLocator,
         entriesToRun: [TestEntry],
+        logger: ContextualLogger,
+        runnerWasteCollector: RunnerWasteCollector,
         simulator: Simulator,
         temporaryFolder: TemporaryFolder,
         testContext: TestContext,
@@ -92,6 +93,7 @@ public final class FakeTestRunner: TestRunner {
             entriesToRun: entriesToRun,
             testRunnerStream: testRunnerStream,
             testResultProvider: onExecuteTest,
+            onStreamOpen: onStreamOpen,
             onTestStarted: onTestStarted,
             onTestStopped: onTestStopped,
             onStreamClose: onStreamClose,
@@ -99,4 +101,3 @@ public final class FakeTestRunner: TestRunner {
         )
     }
 }
-

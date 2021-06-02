@@ -1,6 +1,7 @@
 import DateProviderTestHelpers
 import Foundation
 import Metrics
+import MetricsExtensions
 import MetricsTestHelpers
 import Graphite
 import QueueModels
@@ -19,10 +20,12 @@ final class MetricReportingTestRunnerStreamTests: XCTestCase {
         version: version,
         host: host,
         persistentMetricsJobId: "",
-        metricRecorder: MetricRecorderImpl(
-            graphiteMetricHandler: metricHandler,
-            statsdMetricHandler: NoOpMetricHandler(),
-            queue: metricQueue
+        specificMetricRecorder: SpecificMetricRecorderWrapper(
+            MetricRecorderImpl(
+                graphiteMetricHandler: metricHandler,
+                statsdMetricHandler: NoOpMetricHandler(),
+                queue: metricQueue
+            )
         )
     )
     lazy var testName = TestName(className: "class", methodName: "test")
@@ -32,6 +35,7 @@ final class MetricReportingTestRunnerStreamTests: XCTestCase {
         result: .failure,
         testDuration: 12,
         testExceptions: [TestException(reason: "reason", filePathInProject: "file", lineNumber: 42)],
+        logs: [],
         testStartTimestamp: 111
     )
     lazy var version = Version(value: "version")

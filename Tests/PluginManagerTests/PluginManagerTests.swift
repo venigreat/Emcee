@@ -9,7 +9,7 @@ import ProcessControllerTestHelpers
 import ResourceLocation
 import ResourceLocationResolverTestHelpers
 import RunnerTestHelpers
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import XCTest
 
@@ -37,10 +37,11 @@ final class PluginManagerTests: XCTestCase {
         
         let manager = PluginManager(
             fileSystem: fileSystem,
+            logger: .noOp,
             pluginLocations: [
                 PluginLocation(.localFilePath(pluginBundlePath.pathString))
             ],
-            processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder),
+            processControllerProvider: FakeProcessControllerProvider(),
             resourceLocationResolver: resolver
         )
         XCTAssertThrowsError(try manager.startPlugins())
@@ -54,10 +55,11 @@ final class PluginManagerTests: XCTestCase {
         )
         let manager = PluginManager(
             fileSystem: fileSystem,
+            logger: .noOp,
             pluginLocations: [
                 PluginLocation(.localFilePath(executablePath.pathString))
             ],
-            processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder),
+            processControllerProvider: FakeProcessControllerProvider(),
             resourceLocationResolver: resolver
         )
         XCTAssertThrowsError(try manager.startPlugins())
@@ -80,6 +82,7 @@ final class PluginManagerTests: XCTestCase {
         
         let manager = PluginManager(
             fileSystem: fileSystem,
+            logger: .noOp,
             pluginLocations: [
                 PluginLocation(.localFilePath(pluginBundlePath.pathString))
             ],

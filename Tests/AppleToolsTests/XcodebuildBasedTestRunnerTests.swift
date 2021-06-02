@@ -19,7 +19,7 @@ import RunnerModels
 import RunnerTestHelpers
 import SimulatorPoolModels
 import SimulatorPoolTestHelpers
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import URLResource
 import XCTest
@@ -28,8 +28,8 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
     private lazy var tempFolder = assertDoesNotThrow { try TemporaryFolder() }
     private let testRunnerStream = AccumulatingTestRunnerStream()
     private let dateProvider = DateProviderFixture(Date(timeIntervalSince1970: 100500))
-    private lazy var contextUuid = UUID()
-    private lazy var processControllerProvider = FakeProcessControllerProvider(tempFolder: tempFolder)
+    private lazy var contextId = UUID().uuidString
+    private lazy var processControllerProvider = FakeProcessControllerProvider()
     private lazy var resourceLocationResolver = FakeResourceLocationResolver(
         resolvingResult: .directlyAccessibleFile(path: tempFolder.absolutePath)
     )
@@ -40,9 +40,8 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
             try tempFolder.pathByCreatingDirectories(components: ["simulator"])
         }
     )
-    private lazy var testContext = createTestContext()
+    private lazy var testContext = assertDoesNotThrow { try createTestContext() }
     private lazy var runner = XcodebuildBasedTestRunner(
-        xctestJsonLocation: nil,
         dateProvider: dateProvider,
         processControllerProvider: processControllerProvider,
         resourceLocationResolver: resourceLocationResolver
@@ -93,15 +92,17 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
             AdditionalAppBundleLocation(.localFilePath(additionalAppPath.pathString)),
         ]
     )
+    private lazy var runnerWasteCollector = RunnerWasteCollectorImpl()
     
-    private func createTestContext(environment: [String: String] = [:]) -> TestContext {
+    private func createTestContext(environment: [String: String] = [:]) throws -> TestContext {
         TestContext(
-            contextUuid: contextUuid,
+            contextId: contextId,
             developerDir: DeveloperDir.current,
             environment: environment,
-            simulatorPath: simulator.path.fileUrl,
+            simulatorPath: simulator.path,
             simulatorUdid: simulator.udid,
-            testDestination: simulator.testDestination
+            testDestination: simulator.testDestination,
+            testsWorkingDirectory: try tempFolder.pathByCreatingDirectories(components: ["testsWorkingDirectory"])
         )
     }
     
@@ -109,6 +110,10 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
         let argsValidatedExpectation = expectation(description: "Arguments have been validated")
         
         processControllerProvider.creator = { subprocess -> ProcessController in
+            guard !(try subprocess.arguments[0].stringValue().contains("tail")) else {
+                return FakeProcessController(subprocess: subprocess)
+            }
+            
             self.assertArgumentsAreCorrect(arguments: subprocess.arguments)
             
             XCTAssertEqual(
@@ -153,13 +158,15 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
                 entriesToRun: [
                     TestEntryFixtures.testEntry()
                 ],
+                logger: .noOp,
+                runnerWasteCollector: runnerWasteCollector,
                 simulator: simulator,
                 temporaryFolder: tempFolder,
                 testContext: testContext,
                 testRunnerStream: testRunnerStream,
                 testType: .logicTest
             )
-            invocation.startExecutingTests().wait()
+            try invocation.startExecutingTests().wait()
         }
         
         wait(for: [argsValidatedExpectation], timeout: 15)
@@ -169,6 +176,10 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
         let argsValidatedExpectation = expectation(description: "Arguments have been validated")
         
         processControllerProvider.creator = { subprocess -> ProcessController in
+            guard !(try subprocess.arguments[0].stringValue().contains("tail")) else {
+                return FakeProcessController(subprocess: subprocess)
+            }
+            
             self.assertArgumentsAreCorrect(arguments: subprocess.arguments)
             
             XCTAssertEqual(
@@ -216,13 +227,15 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
                 entriesToRun: [
                     TestEntryFixtures.testEntry()
                 ],
+                logger: .noOp,
+                runnerWasteCollector: runnerWasteCollector,
                 simulator: simulator,
                 temporaryFolder: tempFolder,
                 testContext: testContext,
                 testRunnerStream: testRunnerStream,
                 testType: .appTest
             )
-            invocation.startExecutingTests().wait()
+            try invocation.startExecutingTests().wait()
         }
         
         wait(for: [argsValidatedExpectation], timeout: 15)
@@ -232,6 +245,10 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
         let argsValidatedExpectation = expectation(description: "Arguments have been validated")
         
         processControllerProvider.creator = { subprocess -> ProcessController in
+            guard !(try subprocess.arguments[0].stringValue().contains("tail")) else {
+                return FakeProcessController(subprocess: subprocess)
+            }
+            
             self.assertArgumentsAreCorrect(arguments: subprocess.arguments)
             
             argsValidatedExpectation.fulfill()
@@ -248,80 +265,20 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
                 entriesToRun: [
                     TestEntryFixtures.testEntry()
                 ],
+                logger: .noOp,
+                runnerWasteCollector: runnerWasteCollector,
                 simulator: simulator,
                 temporaryFolder: tempFolder,
                 testContext: testContext,
                 testRunnerStream: testRunnerStream,
                 testType: .uiTest
             )
-            invocation.startExecutingTests().wait()
+            try invocation.startExecutingTests().wait()
         }
         
         wait(for: [argsValidatedExpectation], timeout: 15)
     }
-    
-    func test___ui_test___test_stream_events() throws {
-        let impactQueue = DispatchQueue(label: "impact.queue")
         
-        processControllerProvider.creator = { subprocess -> ProcessController in
-            let controller = FakeProcessController(subprocess: subprocess)
-            
-            controller.overridedProcessStatus = .stillRunning
-            
-            impactQueue.asyncAfter(deadline: .now() + 0.5) {
-                controller.broadcastStdout(
-                    data: Data("Test Case '-[ModuleWithTests.TestClassName testMethodName]' started.".utf8)
-                )
-                
-                impactQueue.asyncAfter(deadline: .now() + 0.5) {
-                    controller.broadcastStdout(
-                        data: Data("Test Case '-[ModuleWithTests.TestClassName testMethodName]' failed (42.000 seconds).".utf8)
-                    )
-                    
-                    impactQueue.asyncAfter(deadline: .now() + 0.1) {
-                        controller.overridedProcessStatus = .terminated(exitCode: 0)
-                    }
-                }
-            }
-            return controller
-        }
-        
-        assertDoesNotThrow {
-            let invocation = try runner.prepareTestRun(
-                buildArtifacts: buildArtifacts,
-                developerDirLocator: developerDirLocator,
-                entriesToRun: [
-                    TestEntryFixtures.testEntry()
-                ],
-                simulator: simulator,
-                temporaryFolder: tempFolder,
-                testContext: testContext,
-                testRunnerStream: testRunnerStream,
-                testType: .uiTest
-            )
-            invocation.startExecutingTests().wait()
-        }
-        
-        guard testRunnerStream.accumulatedData.count == 2 else {
-            failTest("Unexpected number of events in test stream")
-        }
-        
-        XCTAssertEqual(
-            testRunnerStream.castTo(TestName.self, index: 0),
-            TestName(className: "TestClassName", methodName: "testMethodName")
-        )
-        XCTAssertEqual(
-            testRunnerStream.castTo(TestStoppedEvent.self, index: 1),
-            TestStoppedEvent(
-                testName: TestName(className: "TestClassName", methodName: "testMethodName"),
-                result: .failure,
-                testDuration: 42.0,
-                testExceptions: [],
-                testStartTimestamp: dateProvider.currentDate().addingTimeInterval(-42.0).timeIntervalSince1970
-            )
-        )
-    }
-    
     func test___open_stream_called___when_test_runner_starts() throws {
         testRunnerStream.streamIsOpen = false
         
@@ -331,13 +288,15 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
             entriesToRun: [
                 TestEntryFixtures.testEntry()
             ],
+            logger: .noOp,
+            runnerWasteCollector: runnerWasteCollector,
             simulator: simulator,
             temporaryFolder: tempFolder,
             testContext: testContext,
             testRunnerStream: testRunnerStream,
             testType: .logicTest
         )
-        _ = invocation.startExecutingTests()
+        _ = try invocation.startExecutingTests()
         
         XCTAssertTrue(testRunnerStream.streamIsOpen)
     }
@@ -351,22 +310,26 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
             entriesToRun: [
                 TestEntryFixtures.testEntry()
             ],
+            logger: .noOp,
+            runnerWasteCollector: runnerWasteCollector,
             simulator: simulator,
             temporaryFolder: tempFolder,
             testContext: testContext,
             testRunnerStream: testRunnerStream,
             testType: .logicTest
         )
-        invocation.startExecutingTests().cancel()
         
-        XCTAssertFalse(testRunnerStream.streamIsOpen)
+        let streamIsClosed = XCTestExpectation(description: "Stream closed")
+        testRunnerStream.onCloseStream = streamIsClosed.fulfill
+        
+        try invocation.startExecutingTests().cancel()
+        
+        wait(for: [streamIsClosed], timeout: 10)
     }
     
     func test___working_with_result_stream() throws {
         let testName = TestName(className: "Class", methodName: "test")
         let impactQueue = DispatchQueue(label: "impact.queue")
-        
-        testContext = createTestContext(environment: [XcodebuildBasedTestRunner.useResultStreamToggleEnvName: "true"])
         
         var tailProcessController: FakeProcessController?
         var xcodebuildProcessController: FakeProcessController?
@@ -388,13 +351,15 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
             buildArtifacts: buildArtifacts,
             developerDirLocator: developerDirLocator,
             entriesToRun: [TestEntry(testName: testName, tags: [], caseId: nil)],
+            logger: .noOp,
+            runnerWasteCollector: runnerWasteCollector,
             simulator: simulator,
             temporaryFolder: tempFolder,
             testContext: testContext,
             testRunnerStream: testRunnerStream,
             testType: .logicTest
         )
-        let runningInvocation = invocation.startExecutingTests()
+        let runningInvocation = try invocation.startExecutingTests()
         
         impactQueue.async {
             tailProcessController?.broadcastStdout(data: Data(RSTestStartedTestInput.input(testName: testName).utf8))
@@ -424,14 +389,36 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
                 result: .success,
                 testDuration: 5,
                 testExceptions: [],
+                logs: [],
                 testStartTimestamp: dateProvider.currentDate().timeIntervalSince1970 - 5
             )
         )
     }
     
+    func test___schedules_collection_of_invocation_related_files() throws {
+        _ = try runner.prepareTestRun(
+            buildArtifacts: buildArtifacts,
+            developerDirLocator: developerDirLocator,
+            entriesToRun: [TestEntryFixtures.testEntry()],
+            logger: .noOp,
+            runnerWasteCollector: runnerWasteCollector,
+            simulator: simulator,
+            temporaryFolder: tempFolder,
+            testContext: testContext,
+            testRunnerStream: testRunnerStream,
+            testType: .logicTest
+        )
+        XCTAssertEqual(
+            runnerWasteCollector.collectedPaths,
+            [
+                tempFolder.absolutePath.appending(component: testContext.contextId)
+            ]
+        )
+    }
+    
     private func pathToXctestrunFile() throws -> AbsolutePath {
-        let path = self.tempFolder.pathWith(components: [contextUuid.uuidString, "xctestrun"])
-        let contents = try FileManager.default.contentsOfDirectory(atPath: path.pathString)
+        let path = self.tempFolder.pathWith(components: [contextId])
+        let contents = try FileManager().contentsOfDirectory(atPath: path.pathString)
         let xctestrunFileName: String = contents.first(where: { $0.hasSuffix("xctestrun") }) ?? "NOT_FOUND"
         return path.appending(component: xctestrunFileName)
     }
@@ -452,9 +439,9 @@ final class XcodebuildBasedTestRunnerTests: XCTestCase {
                 "/usr/bin/xcrun",
                 "xcodebuild",
                 "-destination", "platform=iOS Simulator,id=" + simulator.udid.value,
-                "-derivedDataPath", tempFolder.absolutePath.appending(components: [contextUuid.uuidString, "derivedData"]).pathString,
-                "-resultBundlePath", tempFolder.absolutePath.appending(components: [contextUuid.uuidString, "resultBundle"]).pathString,
-                "-resultStreamPath", tempFolder.absolutePath.appending(components: [contextUuid.uuidString, "result_stream.json"]).pathString,
+                "-derivedDataPath", tempFolder.absolutePath.appending(components: [contextId, "derivedData"]).pathString,
+                "-resultBundlePath", tempFolder.absolutePath.appending(components: [contextId, "resultBundle"]).pathString,
+                "-resultStreamPath", tempFolder.absolutePath.appending(components: [contextId, "result_stream.json"]).pathString,
                 "-xctestrun", try pathToXctestrunFile().pathString,
                 "-parallel-testing-enabled", "NO",
                 "test-without-building"

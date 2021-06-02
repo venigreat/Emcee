@@ -1,4 +1,5 @@
 import DateProviderTestHelpers
+import EmceeLogging
 import Foundation
 import Runner
 import RunnerModels
@@ -17,12 +18,13 @@ final class TestTimeoutTrackingTestRunnerSreamTests: XCTestCase {
             detectedLongRunningTest: { _, _ in
                 timeoutCallInvoked.fulfill()
             },
+            logger: { .noOp },
             maximumTestDuration: 5,
             pollPeriod: .milliseconds(100)
         )
         
         stream.testStarted(testName: testName)
-        stream.testStopped(testStoppedEvent: TestStoppedEvent(testName: testName, result: .success, testDuration: 1, testExceptions: [], testStartTimestamp: 0))
+        stream.testStopped(testStoppedEvent: TestStoppedEvent(testName: testName, result: .success, testDuration: 1, testExceptions: [], logs: [], testStartTimestamp: 0))
         
         wait(for: [timeoutCallInvoked], timeout: 5)
     }
@@ -37,6 +39,7 @@ final class TestTimeoutTrackingTestRunnerSreamTests: XCTestCase {
             detectedLongRunningTest: { _, _ in
                 timeoutCallInvoked.fulfill()
             },
+            logger: { .noOp },
             maximumTestDuration: 1,
             pollPeriod: .milliseconds(100)
         )
@@ -56,6 +59,7 @@ final class TestTimeoutTrackingTestRunnerSreamTests: XCTestCase {
             detectedLongRunningTest: { _, _ in
                 timeoutCallInvoked.fulfill()
             },
+            logger: { .noOp },
             maximumTestDuration: 1,
             pollPeriod: .milliseconds(100)
         )

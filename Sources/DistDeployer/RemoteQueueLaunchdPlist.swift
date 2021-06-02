@@ -3,7 +3,7 @@ import Foundation
 import LaunchdUtils
 import QueueModels
 import SSHDeployer
-import TemporaryStuff
+import Tmp
 
 public final class RemoteQueueLaunchdPlist {
     /// Unique deployment id
@@ -51,6 +51,8 @@ public final class RemoteQueueLaunchdPlist {
         let launchdPlist = LaunchdPlist(
             job: LaunchdJob(
                 label: jobLabel,
+                username: nil,
+                groupname: nil,
                 programArguments: [
                     remoteQueueServerBinaryPath.pathString, "startLocalQueueServer",
                     "--emcee-version", emceeVersion.value,

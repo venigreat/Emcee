@@ -1,28 +1,32 @@
 import BuildArtifacts
 import Foundation
-import Logging
+import EmceeLogging
+import MetricsExtensions
 import QueueModels
 import RunnerModels
 import TestArgFile
 import TestDiscovery
 
 public final class TestEntryConfigurationGenerator {
+    private let analyticsConfiguration: AnalyticsConfiguration
     private let validatedEntries: [ValidatedTestEntry]
     private let testArgFileEntry: TestArgFileEntry
-    private let persistentMetricsJobId: String
+    private let logger: ContextualLogger
 
     public init(
+        analyticsConfiguration: AnalyticsConfiguration,
         validatedEntries: [ValidatedTestEntry],
         testArgFileEntry: TestArgFileEntry,
-        persistentMetricsJobId: String
+        logger: ContextualLogger
     ) {
+        self.analyticsConfiguration = analyticsConfiguration
         self.validatedEntries = validatedEntries
         self.testArgFileEntry = testArgFileEntry
-        self.persistentMetricsJobId = persistentMetricsJobId
+        self.logger = logger
     }
     
     public func createTestEntryConfigurations() -> [TestEntryConfiguration] {
-        Logger.debug("Preparing test entry configurations for \(testArgFileEntry.testsToRun.count) tests: \(testArgFileEntry.testsToRun)")
+        logger.debug("Preparing test entry configurations for \(testArgFileEntry.testsToRun.count) tests: \(testArgFileEntry.testsToRun)")
         
         let testArgFileEntryConfigurations = testArgFileEntry.testsToRun.flatMap { testToRun -> [TestEntryConfiguration] in
             let testEntries = testEntriesMatching(
@@ -31,6 +35,7 @@ public final class TestEntryConfigurationGenerator {
             )
             return testEntries.map { testEntry -> TestEntryConfiguration in
                 TestEntryConfiguration(
+                    analyticsConfiguration: analyticsConfiguration,
                     buildArtifacts: testArgFileEntry.buildArtifacts,
                     developerDir: testArgFileEntry.developerDir,
                     pluginLocations: testArgFileEntry.pluginLocations,
@@ -46,8 +51,7 @@ public final class TestEntryConfigurationGenerator {
                     testRunnerTool: testArgFileEntry.testRunnerTool,
                     testTimeoutConfiguration: testArgFileEntry.testTimeoutConfiguration,
                     testType: testArgFileEntry.testType,
-                    workerCapabilityRequirements: testArgFileEntry.workerCapabilityRequirements,
-                    persistentMetricsJobId: persistentMetricsJobId
+                    workerCapabilityRequirements: testArgFileEntry.workerCapabilityRequirements
                 )
             }
         }

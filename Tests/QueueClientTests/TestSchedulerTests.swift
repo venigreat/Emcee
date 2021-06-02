@@ -1,4 +1,5 @@
 import Dispatch
+import MetricsExtensions
 import QueueClient
 import QueueModels
 import RESTMethods
@@ -8,17 +9,20 @@ import Types
 import XCTest
 
 final class TestSchedulerTests: XCTestCase {
-    private lazy var scheduler = TestSchedulerImpl(requestSender: requestSender)
+    private lazy var scheduler = TestSchedulerImpl(
+        logger: .noOp,
+        requestSender: requestSender
+    )
     private let callbackQueue = DispatchQueue(label: "callbackQueue")
     private let expectation = XCTestExpectation(description: "Response provided")
     private let requestSender = FakeRequestSender()
     private let workerId: WorkerId = "workerId"
     private lazy var prioritizedJob = PrioritizedJob(
+        analyticsConfiguration: AnalyticsConfiguration(),
         jobGroupId: "group",
         jobGroupPriority: .lowest,
         jobId: "job",
-        jobPriority: .highest,
-        persistentMetricsJobId: ""
+        jobPriority: .highest
     )
     
     func test___success_scenario() {

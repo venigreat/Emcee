@@ -5,13 +5,14 @@ import DateProvider
 import DeveloperDirLocator
 import Dispatch
 import DistWorkerModels
+import EmceeLogging
 import EventBus
 import FileSystem
 import Foundation
 import LocalHostDeterminer
-import Logging
 import LoggingSetup
 import Metrics
+import MetricsExtensions
 import PathLib
 import PluginManager
 import QueueClient
@@ -26,7 +27,7 @@ import Scheduler
 import SimulatorPool
 import SocketModels
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import Timer
 import Types
 import UniqueIdentifierGenerator
@@ -34,12 +35,17 @@ import WorkerCapabilities
 
 public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
     private let di: DI
-    private let callbackQueue = DispatchQueue(label: "DistWorker.callbackQueue", qos: .default, attributes: .concurrent)
+    private let callbackQueue = DispatchQueue(
+        label: "DistWorker.callbackQueue",
+        qos: .default,
+        attributes: .concurrent,
+        target: .global()
+    )
     private let currentlyBeingProcessedBucketsTracker = DefaultCurrentlyBeingProcessedBucketsTracker()
     private let httpRestServer: HTTPRESTServer
     private let version: Version
     private let workerId: WorkerId
-    private let metricRecorder: MetricRecorder
+    private let logger: ContextualLogger
     private var payloadSignature = Either<PayloadSignature, DistWorkerError>.error(DistWorkerError.missingPayloadSignature)
     
     private enum ReducedBucketFetchResult: Equatable {
@@ -50,27 +56,27 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
     public init(
         di: DI,
         version: Version,
-        workerId: WorkerId,
-        metricRecorder: MetricRecorder
-    ) {
+        workerId: WorkerId
+    ) throws {
         self.di = di
+        self.logger = try di.get(ContextualLogger.self)
         self.httpRestServer = HTTPRESTServer(
             automaticTerminationController: StayAliveTerminationController(),
+            logger: logger,
             portProvider: PortProviderWrapper(provider: { 0 })
         )
         self.version = version
         self.workerId = workerId
-        self.metricRecorder = metricRecorder
     }
     
     public func start(
-        didFetchAnalyticsConfiguration: @escaping (AnalyticsConfiguration) throws -> (),
         completion: @escaping () -> ()
     ) throws {
         httpRestServer.add(
             handler: RESTEndpointOf(
                 CurrentlyProcessingBucketsEndpoint(
-                    currentlyBeingProcessedBucketsTracker: currentlyBeingProcessedBucketsTracker
+                    currentlyBeingProcessedBucketsTracker: currentlyBeingProcessedBucketsTracker,
+                    logger: logger
                 )
             )
         )
@@ -84,29 +90,29 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
             ),
             callbackQueue: callbackQueue
         ) { [weak self] result in
+            defer {
+                completion()
+            }
+            guard let strongSelf = self else { return }
             do {
-                guard let strongSelf = self else {
-                    Logger.error("self is nil in start() in DistWorker")
-                    completion()
-                    return
-                }
-                
                 let workerConfiguration = try result.dematerialize()
                 
-                strongSelf.payloadSignature = .success(workerConfiguration.payloadSignature)
-                Logger.debug("Registered with server. Worker configuration: \(workerConfiguration)")
+                try strongSelf.di.get(GlobalMetricRecorder.self).set(
+                    analyticsConfiguration: workerConfiguration.globalAnalyticsConfiguration
+                )
+                if let kibanaConfiguration = workerConfiguration.globalAnalyticsConfiguration.kibanaConfiguration {
+                    try strongSelf.di.get(LoggingSetup.self).set(kibanaConfiguration: kibanaConfiguration)
+                }
                 
-                try didFetchAnalyticsConfiguration(workerConfiguration.analyticsConfiguration)
+                strongSelf.payloadSignature = .success(workerConfiguration.payloadSignature)
+                strongSelf.logger.debug("Registered with server. Worker configuration: \(workerConfiguration)")
                 
                 _ = try strongSelf.runTests(
                     workerConfiguration: workerConfiguration
                 )
-                Logger.verboseDebug("Dist worker has finished")
-                
-                completion()
+                strongSelf.logger.debug("Dist worker has finished")
             } catch {
-                Logger.error("Caught unexpected error: \(error)")
-                completion()
+                strongSelf.logger.error("Caught unexpected error: \(error)")
             }
         }
     }
@@ -118,11 +124,11 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
     ) throws {
         let scheduler = Scheduler(
             di: di,
+            logger: logger,
             numberOfSimulators: workerConfiguration.numberOfSimulators,
             schedulerDataSource: self,
             schedulerDelegate: self,
-            version: version,
-            metricRecorder: metricRecorder
+            version: version
         )
         try scheduler.run()
     }
@@ -144,10 +150,10 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
 
             switch result {
             case .checkLater(let after):
-                Logger.debug("Server asked to wait for \(after) seconds and fetch next bucket again")
+                logger.debug("Server asked to wait for \(after) seconds and fetch next bucket again")
                 return .checkAgain(after: after)
             case .bucket(let fetchedBucket):
-                Logger.debug("Received \(fetchedBucket.bucketId)")
+                logger.debug("Received \(fetchedBucket.bucketId)")
                 tracker.willProcess(bucketId: fetchedBucket.bucketId)
                 return .result(
                     SchedulerBucket.from(
@@ -165,7 +171,7 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
     public func nextBucket() -> SchedulerBucket? {
         while true {
             do {
-                Logger.debug("Fetching next bucket from server")
+                logger.debug("Fetching next bucket from server", workerId: workerId)
                 let fetchResult = try nextBucketFetchResult()
                 switch fetchResult {
                 case .result(let result):
@@ -174,7 +180,7 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
                     try di.get(Waiter.self).wait(timeout: after, description: "Pause before checking queue server again")
                 }
             } catch {
-                Logger.error("Failed to fetch next bucket: \(error)")
+                logger.error("Failed to fetch next bucket: \(error)")
                 return nil
             }
         }
@@ -185,7 +191,7 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
         obtainedTestingResult testingResult: TestingResult,
         forBucket bucket: SchedulerBucket
     ) {
-        Logger.debug("Obtained testing result for bucket \(bucket.bucketId): \(testingResult)")
+        logger.debug("Obtained testing result for bucket \(bucket.bucketId): \(testingResult)")
         didReceiveTestResult(testingResult: testingResult, bucketId: bucket.bucketId)
     }
     
@@ -197,7 +203,7 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
                 workerId: workerId,
                 payloadSignature: try payloadSignature.dematerialize(),
                 callbackQueue: callbackQueue,
-                completion: { [currentlyBeingProcessedBucketsTracker] (result: Either<BucketId, Error>) in
+                completion: { [currentlyBeingProcessedBucketsTracker, logger] (result: Either<BucketId, Error>) in
                     defer {
                         currentlyBeingProcessedBucketsTracker.didProcess(bucketId: bucketId)
                     }
@@ -210,14 +216,14 @@ public final class DistWorker: SchedulerDataSource, SchedulerDelegate {
                                 expected: bucketId
                             )
                         }
-                        Logger.debug("Successfully sent test run result for bucket \(bucketId)")
+                        logger.debug("Successfully sent test run result for bucket \(bucketId)")
                     } catch {
-                        Logger.error("Server response for results of bucket \(bucketId) has error: \(error)")
+                        logger.error("Server response for results of bucket \(bucketId) has error: \(error)")
                     }
                 }
             )
         } catch {
-            Logger.error("Failed to send test run result for bucket \(bucketId): \(error)")
+            logger.error("Failed to send test run result for bucket \(bucketId): \(error)")
         }
     }
 }

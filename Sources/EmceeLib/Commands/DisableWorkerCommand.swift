@@ -2,7 +2,7 @@ import ArgLib
 import AtomicModels
 import DI
 import Foundation
-import Logging
+import EmceeLogging
 import QueueClient
 import QueueModels
 import RequestSender
@@ -48,12 +48,12 @@ public final class DisableWorkerCommand: Command {
         
         let disabledWorkerId = try callbackWaiter.wait(timeout: 15, description: "Request to disable \(workerId) on queue")
         
+        let logger = try di.get(ContextualLogger.self)
+        
         do {
-            Logger.always("Successfully disabled worker \(try disabledWorkerId.dematerialize()) on queue \(queueServerAddress)")
+            logger.info("Successfully disabled worker \(try disabledWorkerId.dematerialize()) on queue \(queueServerAddress)")
         } catch {
-            Logger.error("Failed to disabled worker \(workerId) on queue \(queueServerAddress): \(error)")
+            logger.error("Failed to disabled worker \(workerId) on queue \(queueServerAddress): \(error)")
         }
     }
-    
-    
 }

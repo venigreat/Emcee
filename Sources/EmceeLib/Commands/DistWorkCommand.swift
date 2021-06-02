@@ -6,7 +6,7 @@ import DistWorker
 import EmceeVersion
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import LoggingSetup
 import Metrics
 import PathLib
@@ -21,7 +21,7 @@ import SignalHandling
 import SimulatorPool
 import SocketModels
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 import WorkerCapabilitiesModels
 import WorkerCapabilities
@@ -37,7 +37,7 @@ public final class DistWorkCommand: Command {
     
     private let di: DI
 
-    public init(di: DI) {
+    public init(di: DI) throws {
         self.di = di
     }
     
@@ -48,10 +48,11 @@ public final class DistWorkCommand: Command {
         
         di.set(try createScopedTemporaryFolder(), for: TemporaryFolder.self)
         
-        let metricRecorder: MutableMetricRecorder = try di.get()
+        let logger = try di.get(ContextualLogger.self)
 
         let onDemandSimulatorPool = try OnDemandSimulatorPoolFactory.create(
             di: di,
+            logger: logger,
             version: emceeVersion
         )
         defer { onDemandSimulatorPool.deleteSimulators() }
@@ -62,22 +63,26 @@ public final class DistWorkCommand: Command {
             queueServerAddress: queueServerAddress,
             version: emceeVersion,
             workerId: workerId,
-            metricRecorder: metricRecorder
+            logger: logger
         )
         
-        SignalHandling.addSignalHandler(signals: [.term, .int]) { signal in
-            Logger.debug("Got signal: \(signal)")
+        SignalHandling.addSignalHandler(signals: [.term, .int]) { [logger] signal in
+            logger.debug("Got signal: \(signal)")
             onDemandSimulatorPool.deleteSimulators()
         }
         
-        try startWorker(distWorker: distWorker, emceeVersion: emceeVersion, metricRecorder: metricRecorder)
+        try startWorker(
+            distWorker: distWorker,
+            emceeVersion: emceeVersion,
+            logger: logger
+        )
     }
     
     private func createDistWorker(
         queueServerAddress: SocketAddress,
         version: Version,
         workerId: WorkerId,
-        metricRecorder: MetricRecorder
+        logger: ContextualLogger
     ) throws -> DistWorker {
         let requestSender = try di.get(RequestSenderProvider.self).requestSender(socketAddress: queueServerAddress)
         
@@ -97,41 +102,38 @@ public final class DistWorkCommand: Command {
         di.set(
             JoinedCapabilitiesProvider(
                 providers: [
-                    XcodeCapabilitiesProvider(fileSystem: try di.get()),
+                    XcodeCapabilitiesProvider(
+                        fileSystem: try di.get(),
+                        logger: logger
+                    ),
                 ]
             ),
             for: WorkerCapabilitiesProvider.self
         )
         
-        return DistWorker(
+        let updatedLogger = try di.get(ContextualLogger.self)
+            .withMetadata(key: .workerId, value: workerId.value)
+            .withMetadata(key: .emceeVersion, value: version.value)
+        di.set(updatedLogger)
+        
+        return try DistWorker(
             di: di,
             version: version,
-            workerId: workerId,
-            metricRecorder: metricRecorder
+            workerId: workerId
         )
     }
         
     private func startWorker(
         distWorker: DistWorker,
         emceeVersion: Version,
-        metricRecorder: MutableMetricRecorder
+        logger: ContextualLogger
     ) throws {
         var isWorking = true
         
-        try distWorker.start(
-            didFetchAnalyticsConfiguration: { analyticsConfiguration in
-                try metricRecorder.set(analyticsConfiguration: analyticsConfiguration)
-                if let sentryConfiguration = analyticsConfiguration.sentryConfiguration {
-                    try AnalyticsSetup.setupSentry(sentryConfiguration: sentryConfiguration, emceeVersion: emceeVersion)
-                }
-            },
-            completion: {
-                isWorking = false
-            }
-        )
+        try distWorker.start { isWorking = false }
         
-        SignalHandling.addSignalHandler(signals: [.term, .int]) { signal in
-            Logger.debug("Got signal: \(signal)")
+        SignalHandling.addSignalHandler(signals: [.term, .int]) { [logger] signal in
+            logger.debug("Got signal: \(signal)")
             isWorking = false
         }
         

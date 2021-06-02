@@ -4,7 +4,9 @@ import BucketQueueModels
 import DateProvider
 import Foundation
 import LocalHostDeterminer
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import QueueModels
 import WorkerCapabilitiesModels
 
@@ -12,24 +14,27 @@ public final class DequeueableBucketSourceWithMetricSupport: DequeueableBucketSo
     private let dateProvider: DateProvider
     private let dequeueableBucketSource: DequeueableBucketSource
     private let jobStateProvider: JobStateProvider
+    private let logger: ContextualLogger
     private let queueStateProvider: RunningQueueStateProvider
     private let version: Version
-    private let metricRecorder: MetricRecorder
+    private let specificMetricRecorderProvider: SpecificMetricRecorderProvider
     
     public init(
         dateProvider: DateProvider,
         dequeueableBucketSource: DequeueableBucketSource,
         jobStateProvider: JobStateProvider,
+        logger: ContextualLogger,
         queueStateProvider: RunningQueueStateProvider,
         version: Version,
-        metricRecorder: MetricRecorder
+        specificMetricRecorderProvider: SpecificMetricRecorderProvider
     ) {
         self.dateProvider = dateProvider
         self.dequeueableBucketSource = dequeueableBucketSource
         self.jobStateProvider = jobStateProvider
+        self.logger = logger
         self.queueStateProvider = queueStateProvider
         self.version = version
-        self.metricRecorder = metricRecorder
+        self.specificMetricRecorderProvider = specificMetricRecorderProvider
     }
     
     public func dequeueBucket(workerCapabilities: Set<WorkerCapability>, workerId: WorkerId) -> DequeuedBucket? {
@@ -78,6 +83,13 @@ public final class DequeueableBucketSourceWithMetricSupport: DequeueableBucketSo
                 timestamp: dateProvider.currentDate()
             )
         ]
-        metricRecorder.capture(queueStateMetrics + bucketAndTestMetrics)
+        
+        do {
+            try specificMetricRecorderProvider.specificMetricRecorder(
+                analyticsConfiguration: dequeuedBucket.enqueuedBucket.bucket.analyticsConfiguration
+            ).capture(queueStateMetrics + bucketAndTestMetrics)
+        } catch {
+            logger.error("Failed to send metrics: \(error)")
+        }
     }
 }

@@ -3,7 +3,7 @@ import Foundation
 import PathLib
 import RunnerModels
 import SimulatorPoolModels
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 public final class SimulatorSetPathDeterminerImpl: SimulatorSetPathDeterminer {
@@ -14,7 +14,7 @@ public final class SimulatorSetPathDeterminerImpl: SimulatorSetPathDeterminer {
 
     public init(
         fileSystem: FileSystem,
-        simulatorContainerFolderName: String = "fbsimctl_simulators",
+        simulatorContainerFolderName: String = "simulators",
         temporaryFolder: TemporaryFolder,
         uniqueIdentifierGenerator: UniqueIdentifierGenerator
     ) {

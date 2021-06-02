@@ -2,22 +2,23 @@ import DateProvider
 import Foundation
 import QueueModels
 import Metrics
+import MetricsExtensions
 import LocalHostDeterminer
 
 public final class MultipleQueuesJobManipulator: JobManipulator {
     private let dateProvider: DateProvider
-    private let metricRecorder: MetricRecorder
+    private let specificMetricRecorderProvider: SpecificMetricRecorderProvider
     private let multipleQueuesContainer: MultipleQueuesContainer
     private let emceeVersion: Version
     
     public init(
         dateProvider: DateProvider,
-        metricRecorder: MetricRecorder,
+        specificMetricRecorderProvider: SpecificMetricRecorderProvider,
         multipleQueuesContainer: MultipleQueuesContainer,
         emceeVersion: Version
     ) {
         self.dateProvider = dateProvider
-        self.metricRecorder = metricRecorder
+        self.specificMetricRecorderProvider = specificMetricRecorderProvider
         self.multipleQueuesContainer = multipleQueuesContainer
         self.emceeVersion = emceeVersion
     }
@@ -37,15 +38,19 @@ public final class MultipleQueuesJobManipulator: JobManipulator {
             
             for deletedJobQueue in jobQueuesToDelete {
                 multipleQueuesContainer.untrack(jobGroup: deletedJobQueue.jobGroup)
-            
-                metricRecorder.capture(
-                    JobProcessingDurationMetric(
-                        queueHost: LocalHostDeterminer.currentHostAddress,
-                        version: emceeVersion,
-                        persistentMetricsJobId: deletedJobQueue.persistentMetricsJobId,
-                        duration: dateProvider.currentDate().timeIntervalSince(deletedJobQueue.job.creationTime)
+                
+                if let persistentMetricsJobId = deletedJobQueue.analyticsConfiguration.persistentMetricsJobId {
+                    try specificMetricRecorderProvider.specificMetricRecorder(
+                        analyticsConfiguration: deletedJobQueue.analyticsConfiguration
+                    ).capture(
+                        JobProcessingDurationMetric(
+                            queueHost: LocalHostDeterminer.currentHostAddress,
+                            version: emceeVersion,
+                            persistentMetricsJobId: persistentMetricsJobId,
+                            duration: dateProvider.currentDate().timeIntervalSince(deletedJobQueue.job.creationTime)
+                        )
                     )
-                )
+                }
             }
         }
     }

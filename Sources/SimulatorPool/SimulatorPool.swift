@@ -1,10 +1,9 @@
 import DeveloperDirLocator
 import Dispatch
 import Foundation
-import Logging
+import EmceeLogging
 import ResourceLocationResolver
 import SimulatorPoolModels
-import TemporaryStuff
 import RunnerModels
 
 /**

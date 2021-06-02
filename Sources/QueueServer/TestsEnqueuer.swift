@@ -2,8 +2,9 @@ import BalancingBucketQueue
 import DateProvider
 import Foundation
 import LocalHostDeterminer
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import QueueModels
 import ScheduleStrategy
 
@@ -11,21 +12,24 @@ public final class TestsEnqueuer {
     private let bucketSplitInfo: BucketSplitInfo
     private let dateProvider: DateProvider
     private let enqueueableBucketReceptor: EnqueueableBucketReceptor
+    private let logger: ContextualLogger
     private let version: Version
-    private let metricRecorder: MetricRecorder
+    private let specificMetricRecorderProvider: SpecificMetricRecorderProvider
 
     public init(
         bucketSplitInfo: BucketSplitInfo,
         dateProvider: DateProvider,
         enqueueableBucketReceptor: EnqueueableBucketReceptor,
+        logger: ContextualLogger,
         version: Version,
-        metricRecorder: MetricRecorder
+        specificMetricRecorderProvider: SpecificMetricRecorderProvider
     ) {
         self.bucketSplitInfo = bucketSplitInfo
         self.dateProvider = dateProvider
         self.enqueueableBucketReceptor = enqueueableBucketReceptor
+        self.logger = logger
         self.version = version
-        self.metricRecorder = metricRecorder
+        self.specificMetricRecorderProvider = specificMetricRecorderProvider
     }
     
     public func enqueue(
@@ -39,7 +43,9 @@ public final class TestsEnqueuer {
         )
         try enqueueableBucketReceptor.enqueue(buckets: buckets, prioritizedJob: prioritizedJob)
         
-        metricRecorder.capture(
+        try specificMetricRecorderProvider.specificMetricRecorder(
+            analyticsConfiguration: prioritizedJob.analyticsConfiguration
+        ).capture(
             EnqueueTestsMetric(
                 version: version,
                 queueHost: LocalHostDeterminer.currentHostAddress,
@@ -54,11 +60,11 @@ public final class TestsEnqueuer {
             )
         )
         
-        Logger.info("Enqueued \(buckets.count) buckets for job '\(prioritizedJob)'")
+        logger.info("Enqueued \(buckets.count) buckets for job '\(prioritizedJob)'")
         for bucket in buckets {
-            Logger.verboseDebug("-- \(bucket) with tests:")
+            logger.debug("-- \(bucket) with tests:")
             for testEntries in bucket.testEntries {
-                Logger.verboseDebug("-- -- \(testEntries)")
+                logger.debug("-- -- \(testEntries)")
             }
         }
     }

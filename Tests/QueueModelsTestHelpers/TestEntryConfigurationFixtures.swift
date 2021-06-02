@@ -2,6 +2,7 @@ import BuildArtifacts
 import BuildArtifactsTestHelpers
 import DeveloperDirModels
 import Foundation
+import MetricsExtensions
 import PluginSupport
 import QueueModels
 import RunnerModels
@@ -11,6 +12,7 @@ import SimulatorPoolTestHelpers
 import WorkerCapabilitiesModels
 
 public final class TestEntryConfigurationFixtures {
+    public var analyticsConfiguration = AnalyticsConfiguration()
     public var buildArtifacts = BuildArtifactsFixtures.fakeEmptyBuildArtifacts()
     public var pluginLocations = Set<PluginLocation>()
     public var simulatorSettings = SimulatorSettings(
@@ -35,6 +37,11 @@ public final class TestEntryConfigurationFixtures {
     
     public func add(testEntries: [TestEntry]) -> Self {
         self.testEntries.append(contentsOf: testEntries)
+        return self
+    }
+    
+    public func with(analyticsConfiguration: AnalyticsConfiguration) -> Self {
+        self.analyticsConfiguration = analyticsConfiguration
         return self
     }
     
@@ -86,20 +93,20 @@ public final class TestEntryConfigurationFixtures {
     public func testEntryConfigurations() -> [TestEntryConfiguration] {
         return testEntries.map { testEntry in
             TestEntryConfiguration(
+                analyticsConfiguration: analyticsConfiguration,
                 buildArtifacts: buildArtifacts,
                 developerDir: developerDir,
                 pluginLocations: pluginLocations,
-                simulatorControlTool: SimulatorControlToolFixtures.fakeFbsimctlTool,
+                simulatorControlTool: SimulatorControlToolFixtures.simctlTool,
                 simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
                 simulatorSettings: simulatorSettings,
                 testDestination: testDestination,
                 testEntry: testEntry,
                 testExecutionBehavior: testExecutionBehavior,
-                testRunnerTool: TestRunnerToolFixtures.fakeFbxctestTool,
+                testRunnerTool: .xcodebuild,
                 testTimeoutConfiguration: testTimeoutConfiguration,
                 testType: testType,
-                workerCapabilityRequirements: workerCapabilityRequirements,
-                persistentMetricsJobId: persistentMetricsJobId
+                workerCapabilityRequirements: workerCapabilityRequirements
             )
         }
     }

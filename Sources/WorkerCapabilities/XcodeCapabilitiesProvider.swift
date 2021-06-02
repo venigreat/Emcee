@@ -1,17 +1,20 @@
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 import PlistLib
 import WorkerCapabilitiesModels
 
 public final class XcodeCapabilitiesProvider: WorkerCapabilitiesProvider {
     private let fileSystem: FileSystem
+    private let logger: ContextualLogger
     
     public init(
-        fileSystem: FileSystem
+        fileSystem: FileSystem,
+        logger: ContextualLogger
     ) {
         self.fileSystem = fileSystem
+        self.logger = logger
     }
     
     public static func workerCapabilityName(shortVersion: String) -> WorkerCapabilityName {
@@ -55,13 +58,13 @@ public final class XcodeCapabilitiesProvider: WorkerCapabilitiesProvider {
                         )
                     )
                 } catch {
-                    Logger.error("Error while discovering Xcode at path \(path): \(error)")
+                    logger.error("Error while discovering Xcode at path \(path): \(error)")
                 }
             }
             
             return discoveredXcodes
         } catch {
-            Logger.error("Error discovering Xcodes: \(error)")
+            logger.error("Error discovering Xcodes: \(error)")
             return []
         }
     }

@@ -1,7 +1,7 @@
 import Dispatch
 import DistWorkerModels
 import Foundation
-import Logging
+import EmceeLogging
 import RequestSender
 import RESTInterfaces
 import RESTMethods
@@ -20,8 +20,6 @@ public final class ToggleWorkersSharingEndpoint: RESTEndpoint {
     }
     
     public func handle(payload: ToggleWorkersSharingPayload) throws -> VoidPayload {
-        Logger.debug("Change workers sharing feature state to :\(payload.status)")
-        
         switch payload.status {
         case .disabled:
             poller.stopPollingAndRestoreDefaultConfig()

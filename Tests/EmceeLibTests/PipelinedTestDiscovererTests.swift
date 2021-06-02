@@ -1,6 +1,7 @@
 import AtomicModels
 import BuildArtifacts
 import BuildArtifactsTestHelpers
+import EmceeLogging
 import EmceeLib
 import Foundation
 import LoggingSetup
@@ -25,6 +26,7 @@ final class PipelinedTestDiscovererTests: XCTestCase {
     
     func test___empty_results() throws {
         let result = try discoverer.performTestDiscovery(
+            logger: .noOp,
             testArgFile: TestArgFile.create(
                 buildArtifacts: []
             ),
@@ -69,6 +71,7 @@ final class PipelinedTestDiscovererTests: XCTestCase {
         }
         
         _ = try discoverer.performTestDiscovery(
+            logger: .noOp,
             testArgFile: TestArgFile.create(
                 buildArtifacts: buildArtifacts
             ),
@@ -95,6 +98,7 @@ final class PipelinedTestDiscovererTests: XCTestCase {
 
         assertThrows {
             _ = try discoverer.performTestDiscovery(
+                logger: .noOp,
                 testArgFile: TestArgFile.create(buildArtifacts: [buildArtifacts]),
                 emceeVersion: "version",
                 remoteCacheConfig: nil
@@ -137,6 +141,7 @@ final class PipelinedTestDiscovererTests: XCTestCase {
         }
         
         let results = try discoverer.performTestDiscovery(
+            logger: .noOp,
             testArgFile: TestArgFile.create(
                 buildArtifacts: buildArtifacts
             ),
@@ -182,7 +187,6 @@ private class FakeRuntimeDumpRemoteCacheProvider: RuntimeDumpRemoteCacheProvider
 extension TestArgFile {
     static func create(buildArtifacts: [BuildArtifacts]) -> TestArgFile {
         TestArgFile(
-            analyticsConfiguration: TestArgFileDefaultValues.analyticsConfiguration,
             entries: buildArtifacts.map {
                 TestArgFileEntry(
                     buildArtifacts: $0,
@@ -203,11 +207,11 @@ extension TestArgFile {
                 )
             },
             prioritizedJob: PrioritizedJob(
+                analyticsConfiguration: TestArgFileDefaultValues.analyticsConfiguration,
                 jobGroupId: "groupId",
                 jobGroupPriority: .medium,
                 jobId: "jobId",
-                jobPriority: .medium,
-                persistentMetricsJobId: ""
+                jobPriority: .medium
             ),
             testDestinationConfigurations: []
         )

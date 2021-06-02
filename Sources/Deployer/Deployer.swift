@@ -1,8 +1,8 @@
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 import ProcessController
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 /** Basic class that defines a logic for deploying a number of DeployableItems. */
@@ -11,6 +11,7 @@ open class Deployer {
     public let deployables: [DeployableItem]
     public let deployableCommands: [DeployableCommand]
     public let destination: DeploymentDestination
+    private let logger: ContextualLogger
     private let processControllerProvider: ProcessControllerProvider
     private let temporaryFolder: TemporaryFolder
     private let uniqueIdentifierGenerator: UniqueIdentifierGenerator
@@ -20,6 +21,7 @@ open class Deployer {
         deployables: [DeployableItem],
         deployableCommands: [DeployableCommand],
         destination: DeploymentDestination,
+        logger: ContextualLogger,
         processControllerProvider: ProcessControllerProvider,
         temporaryFolder: TemporaryFolder,
         uniqueIdentifierGenerator: UniqueIdentifierGenerator
@@ -28,6 +30,7 @@ open class Deployer {
         self.deployables = deployables
         self.deployableCommands = deployableCommands
         self.destination = destination
+        self.logger = logger
         self.processControllerProvider = processControllerProvider
         self.temporaryFolder = temporaryFolder
         self.uniqueIdentifierGenerator = uniqueIdentifierGenerator
@@ -45,31 +48,32 @@ open class Deployer {
      * from a URL with a package of the DeployableItem to a corresponding DeployableItem
      */
     private func prepareDeployables() throws -> [AbsolutePath: DeployableItem] {
-        let syncQueue = DispatchQueue(label: "ru.avito.Deployer.syncQueue")
+        let syncQueue = DispatchQueue(label: "Deployer.syncQueue")
         var deployablesFailedToPrepare = [DeployableItem]()
         var pathToDeployable = [AbsolutePath: DeployableItem]()
         let packager = Packager(processControllerProvider: processControllerProvider)
         
         let queue = DispatchQueue(
-            label: "ru.avito.Deployer",
+            label: "Deployer.queue",
             qos: .default,
             attributes: .concurrent,
             autoreleaseFrequency: .workItem,
-            target: nil)
+            target: DispatchQueue.global()
+        )
         let group = DispatchGroup()
         for deployable in deployables {
             group.enter()
             queue.async {
                 do {
-                    Logger.debug("Preparing deployable '\(deployable.name)'...")
+                    self.logger.debug("Preparing deployable '\(deployable.name)'...")
                     let path = try packager.preparePackage(
                         deployable: deployable,
                         packageFolder: try self.temporaryFolder.pathByCreatingDirectories(components: [self.uniqueIdentifierGenerator.generate()])
                     )
-                    Logger.debug("'\(deployable.name)' package path: \(path)")
+                    self.logger.debug("'\(deployable.name)' package path: \(path)")
                     syncQueue.sync { pathToDeployable[path] = deployable }
                 } catch {
-                    Logger.error("Failed to prepare deployable \(deployable.name): \(error)")
+                    self.logger.error("Failed to prepare deployable \(deployable.name): \(error)")
                     syncQueue.sync { deployablesFailedToPrepare.append(deployable) }
                 }
                 group.leave()
@@ -90,6 +94,6 @@ open class Deployer {
     open func deployToDestination(
         pathToDeployable: [AbsolutePath: DeployableItem]
     ) throws {
-        Logger.fatal("Deployer.deployToDestinations() must be overrided in subclass")
+        fatalError("Deployer.deployToDestinations() must be overrided in subclass")
     }
 }

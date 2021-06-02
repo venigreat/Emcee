@@ -8,9 +8,10 @@ import DistDeployer
 import EmceeVersion
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import LoggingSetup
 import Metrics
+import MetricsExtensions
 import PathLib
 import PluginManager
 import PortDeterminer
@@ -26,7 +27,7 @@ import SignalHandling
 import SimulatorPool
 import SocketModels
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import TestArgFile
 import TestDiscovery
 import Types
@@ -40,7 +41,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         ArgumentDescriptions.junit.asOptional,
         ArgumentDescriptions.queueServerConfigurationLocation.asRequired,
         ArgumentDescriptions.remoteCacheConfig.asOptional,
-        ArgumentDescriptions.tempFolder.asRequired,
+        ArgumentDescriptions.tempFolder.asOptional,
         ArgumentDescriptions.testArgFile.asRequired,
         ArgumentDescriptions.trace.asOptional,
     ]
@@ -49,7 +50,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
     private let di: DI
     private let testArgFileValidator = TestArgFileValidator()
     
-    public init(di: DI) {
+    public init(di: DI) throws {
         self.di = di
     }
     
@@ -66,9 +67,22 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         )
 
         let emceeVersion: Version = try payload.optionalSingleTypedValue(argumentName: ArgumentDescriptions.emceeVersion.name) ?? EmceeVersion.version
-        let tempFolder = try TemporaryFolder(containerPath: try payload.expectedSingleTypedValue(argumentName: ArgumentDescriptions.tempFolder.name))
+        let tempFolder = try TemporaryFolder(containerPath: try payload.optionalSingleTypedValue(argumentName: ArgumentDescriptions.tempFolder.name))
         let testArgFile = try ArgumentsReader.testArgFile(try payload.expectedSingleTypedValue(argumentName: ArgumentDescriptions.testArgFile.name))
         try testArgFileValidator.validate(testArgFile: testArgFile)
+        
+        if let kibanaConfiguration = testArgFile.prioritizedJob.analyticsConfiguration.kibanaConfiguration {
+            try di.get(LoggingSetup.self).set(kibanaConfiguration: kibanaConfiguration)
+        }
+        try di.get(GlobalMetricRecorder.self).set(
+            analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration
+        )
+        di.set(
+            try di.get(ContextualLogger.self).with(
+                analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration
+            )
+        )
+        let logger = try di.get(ContextualLogger.self)
 
         let remoteCacheConfig = try ArgumentsReader.remoteCacheConfig(
             try payload.optionalSingleTypedValue(argumentName: ArgumentDescriptions.remoteCacheConfig.name)
@@ -80,15 +94,18 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             emceeVersion: emceeVersion,
             queueServerDeploymentDestination: queueServerConfiguration.queueServerDeploymentDestination,
             queueServerConfigurationLocation: queueServerConfigurationLocation,
-            jobId: testArgFile.prioritizedJob.jobId
+            jobId: testArgFile.prioritizedJob.jobId,
+            logger: logger
         )
         let jobResults = try runTestsOnRemotelyRunningQueue(
             queueServerAddress: runningQueueServerAddress,
             remoteCacheConfig: remoteCacheConfig,
             testArgFile: testArgFile,
-            version: emceeVersion
+            version: emceeVersion,
+            logger: logger
         )
         let resultOutputGenerator = ResultingOutputGenerator(
+            logger: logger,
             testingResults: jobResults.testingResults,
             commonReportOutput: commonReportOutput,
             testDestinationConfigurations: testArgFile.testDestinationConfigurations
@@ -100,13 +117,16 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         emceeVersion: Version,
         queueServerDeploymentDestination: DeploymentDestination,
         queueServerConfigurationLocation: QueueServerConfigurationLocation,
-        jobId: JobId
+        jobId: JobId,
+        logger: ContextualLogger
     ) throws -> SocketAddress {
-        Logger.info("Searching for queue server on '\(queueServerDeploymentDestination.host)' with queue version \(emceeVersion)")
+        logger.info("Searching for queue server on '\(queueServerDeploymentDestination.host)' with queue version \(emceeVersion)")
         let remoteQueueDetector = DefaultRemoteQueueDetector(
             emceeVersion: emceeVersion,
+            logger: logger,
             remotePortDeterminer: RemoteQueuePortScanner(
                 host: queueServerDeploymentDestination.host,
+                logger: logger,
                 portRange: EmceePorts.defaultQueuePortRange,
                 requestSenderProvider: try di.get()
             )
@@ -117,7 +137,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
                 host: queueServerDeploymentDestination.host,
                 port: try selectPort(ports: suitablePorts)
             )
-            Logger.info("Found queue server at '\(socketAddress)'")
+            logger.info("Found queue server at '\(socketAddress)'")
             return socketAddress
         }
         
@@ -125,7 +145,8 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             jobId: jobId,
             queueServerDeploymentDestination: queueServerDeploymentDestination,
             emceeVersion: emceeVersion,
-            queueServerConfigurationLocation: queueServerConfigurationLocation
+            queueServerConfigurationLocation: queueServerConfigurationLocation,
+            logger: logger
         )
         
         try di.get(Waiter.self).waitWhile(pollPeriod: 1.0, timeout: 30.0, description: "Wait for remote queue to start") {
@@ -137,7 +158,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             host: queueServerDeploymentDestination.host,
             port: try selectPort(ports: suitablePorts)
         )
-        Logger.info("Found queue server at '\(queueServerAddress)'")
+        logger.info("Found queue server at '\(queueServerAddress)'")
 
         return queueServerAddress
     }
@@ -146,13 +167,15 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         jobId: JobId,
         queueServerDeploymentDestination: DeploymentDestination,
         emceeVersion: Version,
-        queueServerConfigurationLocation: QueueServerConfigurationLocation
+        queueServerConfigurationLocation: QueueServerConfigurationLocation,
+        logger: ContextualLogger
     ) throws {
-        Logger.info("No running queue server has been found. Will deploy and start remote queue.")
+        logger.info("No running queue server has been found. Will deploy and start remote queue.")
         let remoteQueueStarter = RemoteQueueStarter(
             deploymentId: jobId.value,
             deploymentDestination: queueServerDeploymentDestination,
             emceeVersion: emceeVersion,
+            logger: logger,
             processControllerProvider: try di.get(),
             queueServerConfigurationLocation: queueServerConfigurationLocation,
             tempFolder: try di.get(),
@@ -165,26 +188,24 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         queueServerAddress: SocketAddress,
         remoteCacheConfig: RuntimeDumpRemoteCacheConfig?,
         testArgFile: TestArgFile,
-        version: Version
+        version: Version,
+        logger: ContextualLogger
     ) throws -> JobResults {
-        try di.get(MutableMetricRecorder.self).set(analyticsConfiguration: testArgFile.analyticsConfiguration)
-        if let sentryConfiguration = testArgFile.analyticsConfiguration.sentryConfiguration {
-            try AnalyticsSetup.setupSentry(sentryConfiguration: sentryConfiguration, emceeVersion: version)
-        }
-        
         let onDemandSimulatorPool = try OnDemandSimulatorPoolFactory.create(
             di: di,
+            logger: logger,
             version: version
         )
         defer { onDemandSimulatorPool.deleteSimulators() }
         
-        di.set(onDemandSimulatorPool, for:OnDemandSimulatorPool.self)
+        di.set(onDemandSimulatorPool, for: OnDemandSimulatorPool.self)
         di.set(
             TestDiscoveryQuerierImpl(
                 dateProvider: try di.get(),
                 developerDirLocator: try di.get(),
                 fileSystem: try di.get(),
-                metricRecorder: try di.get(),
+                globalMetricRecorder: try di.get(),
+                specificMetricRecorderProvider: try di.get(),
                 onDemandSimulatorPool: try di.get(),
                 pluginEventBusProvider: try di.get(),
                 processControllerProvider: try di.get(),
@@ -217,7 +238,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         )
         
         defer {
-            deleteJob(jobId: testArgFile.prioritizedJob.jobId)
+            deleteJob(jobId: testArgFile.prioritizedJob.jobId, logger: logger)
         }
         
         try JobPreparer(di: di).formJob(
@@ -227,14 +248,14 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             testArgFile: testArgFile
         )
         
-        try waitForJobQueueToDeplete(jobId: testArgFile.prioritizedJob.jobId)
+        try waitForJobQueueToDeplete(jobId: testArgFile.prioritizedJob.jobId, logger: logger)
         return try fetchJobResults(jobId: testArgFile.prioritizedJob.jobId)
     }
     
-    private func waitForJobQueueToDeplete(jobId: JobId) throws {
+    private func waitForJobQueueToDeplete(jobId: JobId, logger: ContextualLogger) throws {
         var caughtSignal = false
-        SignalHandling.addSignalHandler(signals: [.int, .term]) { signal in
-            Logger.info("Caught \(signal) signal")
+        SignalHandling.addSignalHandler(signals: [.int, .term]) { [logger] signal in
+            logger.info("Caught \(signal) signal")
             caughtSignal = true
         }
         
@@ -243,8 +264,11 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             
             let state = try fetchJobState(jobId: jobId)
             switch state.queueState {
-            case .deleted: return false
-            case .running(let queueState): return !queueState.isDepleted
+            case .deleted:
+                return false
+            case .running(let queueState):
+                BucketQueueStateLogger(runningQueueState: queueState, logger: logger).printQueueSize()
+                return !queueState.isDepleted
             }
         }
     }
@@ -266,7 +290,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             callbackQueue: callbackQueue,
             completion: callbackWaiter.set
         )
-        return try callbackWaiter.wait(timeout: .infinity, description: "").dematerialize()
+        return try callbackWaiter.wait(timeout: .infinity, description: "Fetch job state").dematerialize()
     }
     
     private func selectPort(ports: Set<SocketModels.Port>) throws -> SocketModels.Port {
@@ -278,7 +302,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
         return port
     }
     
-    private func deleteJob(jobId: JobId) {
+    private func deleteJob(jobId: JobId, logger: ContextualLogger) {
         do {
             let callbackWaiter: CallbackWaiter<Either<(), Error>> = try di.get(Waiter.self).createCallbackWaiter()
             try di.get(JobDeleter.self).delete(
@@ -288,7 +312,7 @@ public final class RunTestsOnRemoteQueueCommand: Command {
             )
             try callbackWaiter.wait(timeout: .infinity, description: "Deleting job").dematerialize()
         } catch {
-            Logger.warning("Failed to delete job")
+            logger.warning("Failed to delete job")
         }
     }
 }

@@ -2,6 +2,7 @@ import AppleTools
 import DateProvider
 import Foundation
 import Metrics
+import MetricsExtensions
 import PathLib
 import ProcessController
 import QueueModels
@@ -9,8 +10,7 @@ import ResourceLocationResolver
 import RunnerModels
 import SimulatorPool
 import SimulatorPoolModels
-import TemporaryStuff
-import fbxctest
+import Tmp
 
 public final class SimulatorStateMachineActionExecutorProviderImpl: SimulatorStateMachineActionExecutorProvider {
     private let dateProvider: DateProvider
@@ -18,7 +18,7 @@ public final class SimulatorStateMachineActionExecutorProviderImpl: SimulatorSta
     private let resourceLocationResolver: ResourceLocationResolver
     private let simulatorSetPathDeterminer: SimulatorSetPathDeterminer
     private let version: Version
-    private let metricRecorder: MetricRecorder
+    private let globalMetricRecorder: GlobalMetricRecorder
 
     public init(
         dateProvider: DateProvider,
@@ -26,14 +26,14 @@ public final class SimulatorStateMachineActionExecutorProviderImpl: SimulatorSta
         resourceLocationResolver: ResourceLocationResolver,
         simulatorSetPathDeterminer: SimulatorSetPathDeterminer,
         version: Version,
-        metricRecorder: MetricRecorder
+        globalMetricRecorder: GlobalMetricRecorder
     ) {
         self.dateProvider = dateProvider
         self.processControllerProvider = processControllerProvider
         self.resourceLocationResolver = resourceLocationResolver
         self.simulatorSetPathDeterminer = simulatorSetPathDeterminer
         self.version = version
-        self.metricRecorder = metricRecorder
+        self.globalMetricRecorder = globalMetricRecorder
     }
     
     public func simulatorStateMachineActionExecutor(
@@ -46,12 +46,6 @@ public final class SimulatorStateMachineActionExecutorProviderImpl: SimulatorSta
         let simulatorStateMachineActionExecutor: SimulatorStateMachineActionExecutor
         
         switch simulatorControlTool.tool {
-        case .fbsimctl(let fbsimctlLocation):
-            simulatorStateMachineActionExecutor = FbsimctlBasedSimulatorStateMachineActionExecutor(
-                fbsimctl: resourceLocationResolver.resolvable(withRepresentable: fbsimctlLocation),
-                processControllerProvider: processControllerProvider,
-                simulatorsContainerPath: simulatorSetPath
-            )
         case .simctl:
             simulatorStateMachineActionExecutor = SimctlBasedSimulatorStateMachineActionExecutor(
                 processControllerProvider: processControllerProvider,
@@ -63,7 +57,7 @@ public final class SimulatorStateMachineActionExecutorProviderImpl: SimulatorSta
             dateProvider: dateProvider,
             delegate: simulatorStateMachineActionExecutor,
             version: version,
-            metricRecorder: metricRecorder
+            globalMetricRecorder: globalMetricRecorder
         )
     }
 }

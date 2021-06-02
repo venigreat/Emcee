@@ -1,16 +1,17 @@
 import Deployer
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 import ProcessController
 import QueueModels
 import SocketModels
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 public final class DefaultRemoteWorkersStarter: RemoteWorkerStarter {
     private let deploymentDestination: DeploymentDestination
     private let emceeVersion: Version
+    private let logger: ContextualLogger
     private let processControllerProvider: ProcessControllerProvider
     private let tempFolder: TemporaryFolder
     private let uniqueIdentifierGenerator: UniqueIdentifierGenerator
@@ -18,12 +19,14 @@ public final class DefaultRemoteWorkersStarter: RemoteWorkerStarter {
     public init(
         deploymentDestination: DeploymentDestination,
         emceeVersion: Version,
+        logger: ContextualLogger,
         processControllerProvider: ProcessControllerProvider,
         tempFolder: TemporaryFolder,
         uniqueIdentifierGenerator: UniqueIdentifierGenerator
     ) {
         self.deploymentDestination = deploymentDestination
         self.emceeVersion = emceeVersion
+        self.logger = logger
         self.processControllerProvider = processControllerProvider
         self.tempFolder = tempFolder
         self.uniqueIdentifierGenerator = uniqueIdentifierGenerator
@@ -52,7 +55,7 @@ public final class DefaultRemoteWorkersStarter: RemoteWorkerStarter {
             contents: try launchdPlist.plistData()
         )
         
-        Logger.debug("Deploying to \(deploymentDestination)")
+        logger.debug("Deploying to \(deploymentDestination)")
         
         let launchdDeployableItem = DeployableItem(
             name: "launchd_plist",
@@ -79,6 +82,7 @@ public final class DefaultRemoteWorkersStarter: RemoteWorkerStarter {
                 ],
                 launchctlDeployableCommands.forceLoadInBackgroundCommand()
             ],
+            logger: logger,
             processControllerProvider: processControllerProvider,
             tempFolder: tempFolder,
             uniqueIdentifierGenerator: uniqueIdentifierGenerator

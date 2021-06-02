@@ -1,13 +1,15 @@
 import DateProvider
 import Dispatch
+import EmceeLogging
 import FileSystem
 import Foundation
+import Kibana
 import LocalHostDeterminer
 import Logging
 import Metrics
+import MetricsExtensions
 import PathLib
-import Sentry
-import TemporaryStuff
+import Tmp
 
 public final class LoggingSetup {
     private let dateProvider: DateProvider
@@ -24,7 +26,7 @@ public final class LoggingSetup {
         self.fileSystem = fileSystem
     }
     
-    public func setupLogging(stderrVerbosity: Verbosity) throws {
+    public func setupLogging(stderrVerbosity: Verbosity) throws -> ContextualLogger {
         let filename = logFilePrefix + String(ProcessInfo.processInfo.processIdentifier)
         let detailedLogPath = try TemporaryFile(
             containerPath: try logsContainerFolder(),
@@ -33,15 +35,36 @@ public final class LoggingSetup {
             deleteOnDealloc: false
         )
         
-        let aggregatedHandler = AggregatedLoggerHandler(
-            handlers: createLoggerHandlers(
-                stderrVerbosity: stderrVerbosity,
-                detaildLogFileHandle: detailedLogPath.fileHandleForWriting
+        GlobalLoggerConfig.loggerHandler.append(handler: createStderrInfoLoggerHandler(verbosity: stderrVerbosity))
+        GlobalLoggerConfig.loggerHandler.append(handler: createDetailedLoggerHandler(fileHandle: detailedLogPath.fileHandleForWriting))
+        
+        LoggingSystem.bootstrap { _ in GlobalLoggerConfig.loggerHandler }
+        
+        let logger = ContextualLogger(logger: Logger(label: "emcee"), addedMetadata: [:])
+        
+        logger.info("To fetch detailed verbose log:")
+        logger.info("$ scp \(NSUserName())@\(LocalHostDeterminer.currentHostAddress):\(detailedLogPath.absolutePath) /tmp/\(filename).log && open /tmp/\(filename).log")
+        
+        return logger
+    }
+    
+    public func set(kibanaConfiguration: KibanaConfiguration) throws {
+        let handler = KibanaLoggerHandler(
+            kibanaClient: try HttpKibanaClient(
+                dateProvider: dateProvider,
+                endpoints: try kibanaConfiguration.endpoints.map { try KibanaHttpEndpoint.from(url: $0) },
+                indexPattern: kibanaConfiguration.indexPattern,
+                urlSession: .shared
             )
         )
-        GlobalLoggerConfig.loggerHandler = aggregatedHandler
-        Logger.always("To fetch detailed verbose log:")
-        Logger.always("$ scp \(NSUserName())@\(LocalHostDeterminer.currentHostAddress):\(detailedLogPath.absolutePath) /tmp/\(filename).log && open /tmp/\(filename).log")
+        GlobalLoggerConfig.loggerHandler.append(handler: handler)
+    }
+    
+    public func childProcessLogsContainerProvider() throws -> ChildProcessLogsContainerProvider {
+        return ChildProcessLogsContainerProviderImpl(
+            fileSystem: fileSystem,
+            mainContainerPath: try logsContainerFolder()
+        )
     }
     
     public static func tearDown(timeout: TimeInterval) {
@@ -49,6 +72,7 @@ public final class LoggingSetup {
     }
     
     public func cleanUpLogs(
+        logger: ContextualLogger,
         olderThan date: Date,
         queue: OperationQueue,
         completion: @escaping (Error?) -> ()
@@ -59,10 +83,11 @@ public final class LoggingSetup {
         guard dateProvider.currentDate().timeIntervalSince(
             try emceeLogsCleanUpMarkerFileProperties.modificationDate()
         ) > logFilesCleanUpRegularity else {
-            return Logger.debug("Skipping log clean up since last clean up happened recently")
+            logger.debug("Skipping log clean up since last clean up happened recently")
+            return
         }
         
-        Logger.info("Cleaning up old log files")
+        logger.info("Cleaning up old log files")
         try emceeLogsCleanUpMarkerFileProperties.touch()
         
         let logsEnumerator = fileSystem.contentEnumerator(forPath: try fileSystem.emceeLogsFolder(), style: .deep)
@@ -76,7 +101,7 @@ public final class LoggingSetup {
                         do {
                             try self.fileSystem.delete(fileAtPath: path)
                         } catch {
-                            Logger.error("Failed to remove old log file at \(path): \(error)")
+                            logger.error("Failed to remove old log file at \(path): \(error)")
                         }
                     }
                 }
@@ -99,21 +124,25 @@ public final class LoggingSetup {
     
     private func createStderrInfoLoggerHandler(verbosity: Verbosity) -> LoggerHandler {
         return FileHandleLoggerHandler(
+            dateProvider: dateProvider,
             fileHandle: FileHandle.standardError,
             verbosity: verbosity,
             logEntryTextFormatter: NSLogLikeLogEntryTextFormatter(),
             supportsAnsiColors: true,
-            fileHandleShouldBeClosed: false
+            fileHandleShouldBeClosed: false,
+            skipMetadataFlag: .skipStdOutput
         )
     }
     
     private func createDetailedLoggerHandler(fileHandle: FileHandle) -> LoggerHandler {
         return FileHandleLoggerHandler(
+            dateProvider: dateProvider,
             fileHandle: fileHandle,
             verbosity: Verbosity.verboseDebug,
             logEntryTextFormatter: NSLogLikeLogEntryTextFormatter(),
             supportsAnsiColors: false,
-            fileHandleShouldBeClosed: true
+            fileHandleShouldBeClosed: true,
+            skipMetadataFlag: .skipFileOutput
         )
     }
     

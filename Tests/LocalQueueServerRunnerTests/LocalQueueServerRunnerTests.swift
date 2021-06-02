@@ -9,7 +9,7 @@ import QueueServerTestHelpers
 import RemotePortDeterminer
 import RemotePortDeterminerTestHelpers
 import ScheduleStrategy
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import UniqueIdentifierGenerator
 import XCTest
@@ -19,6 +19,7 @@ final class LocalQueueServerRunnerTests: XCTestCase {
     private let automaticTerminationController = AutomaticTerminationControllerFixture(isTerminationAllowed: false)
     private let queueServer = QueueServerFixture()
     private let queueServerTerminationWaiter = QueueServerTerminationWaiterImpl(
+        logger: .noOp,
         pollInterval: 0.1,
         queueServerTerminationPolicy: AutomaticTerminationPolicy.stayAlive
     )
@@ -28,6 +29,7 @@ final class LocalQueueServerRunnerTests: XCTestCase {
     private lazy var runner = LocalQueueServerRunner(
         automaticTerminationController: automaticTerminationController,
         deployQueue: deployQueue,
+        logger: .noOp,
         newWorkerRegistrationTimeAllowance: 60.0,
         pollPeriod: 0.1,
         queueServer: queueServer,

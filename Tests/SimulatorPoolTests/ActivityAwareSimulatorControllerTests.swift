@@ -6,14 +6,15 @@ import XCTest
 final class ActivityAwareSimulatorControllerTests: XCTestCase {
     let fakeSimulatorController = FakeSimulatorController(
         simulator: SimulatorFixture.simulator(),
-        simulatorControlTool: SimulatorControlToolFixtures.fakeFbsimctlTool,
+        simulatorControlTool: SimulatorControlToolFixtures.simctlTool,
         developerDir: .current
     )
     
     lazy var activityAwareController = ActivityAwareSimulatorController(
         automaticDeleteTimePeriod: 1.0,
         automaticShutdownTimePeriod: 1.0,
-        delegate: fakeSimulatorController
+        delegate: fakeSimulatorController,
+        logger: .noOp
     )
     
     func test___when_idle___passes_through() {

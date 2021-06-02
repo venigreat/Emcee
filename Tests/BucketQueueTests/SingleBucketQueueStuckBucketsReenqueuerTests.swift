@@ -16,15 +16,16 @@ final class SingleBucketQueueStuckBucketsReenqueuerTests: XCTestCase {
     lazy var uniqueIdentifierGenerator = FixedValueUniqueIdentifierGenerator()
     lazy var workerAlivenessProvider = WorkerAlivenessProviderImpl(
         knownWorkerIds: [workerId],
+        logger: .noOp,
         workerPermissionProvider: workerPermissionProvider
     )
     lazy var workerPermissionProvider = FakeWorkerPermissionProvider()
     lazy var workerId = WorkerId("workerId")
 
-    
     lazy var reenqueuer = SingleBucketQueueStuckBucketsReenqueuer(
         bucketEnqueuer: bucketEnqueuer,
         bucketQueueHolder: bucketQueueHolder,
+        logger: .noOp,
         workerAlivenessProvider: workerAlivenessProvider,
         uniqueIdentifierGenerator: uniqueIdentifierGenerator
     )

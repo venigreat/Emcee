@@ -1,11 +1,12 @@
 import DateProviderTestHelpers
-import QueueModels
+import MetricsExtensions
 import MetricsTestHelpers
+import QueueModels
 import SimulatorPool
 import SimulatorPoolModels
 import SimulatorPoolTestHelpers
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import XCTest
 
 final class SimulatorPoolConvenienceTests: XCTestCase {
@@ -17,9 +18,10 @@ final class SimulatorPoolConvenienceTests: XCTestCase {
         let pool = SimulatorPoolMock()
         let allocatedSimulator = try pool.allocateSimulator(
             dateProvider: dateProvider,
+            logger: .noOp,
             simulatorOperationTimeouts: simulatorOperationTimeouts,
             version: version,
-            metricRecorder: NoOpMetricRecorder()
+            globalMetricRecorder: GlobalMetricRecorderImpl()
         )
         allocatedSimulator.releaseSimulator()
         

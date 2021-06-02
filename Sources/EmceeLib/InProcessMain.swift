@@ -2,13 +2,17 @@ import ArgLib
 import DI
 import DateProvider
 import DeveloperDirLocator
+import EmceeLogging
+import EmceeVersion
 import FileCache
 import FileSystem
 import Foundation
 import LocalHostDeterminer
-import Logging
 import LoggingSetup
+import Logging
 import Metrics
+import MetricsExtensions
+import PathLib
 import PluginManager
 import ProcessController
 import QueueModels
@@ -34,31 +38,59 @@ public final class InProcessMain {
             SystemDateProvider(),
             for: DateProvider.self
         )
+        di.set(
+            SpecificMetricRecorderProviderImpl(
+                mutableMetricRecorderProvider: MutableMetricRecorderProviderImpl(
+                    queue: DispatchQueue(
+                        label: "MutableMetricRecorderProvider.queue",
+                        attributes: .concurrent,
+                        target: .global()
+                    )
+                )
+            ),
+            for: SpecificMetricRecorderProvider.self
+        )
         
-        setupMetrics(di: di)
-        let metricRecorder: MetricRecorder = try di.get()
+        // global metric recorder to be configured after obtaining analytics configuration 
+        di.set(
+            GlobalMetricRecorderImpl(),
+            for: GlobalMetricRecorder.self
+        )
+        
+        let globalMetricRecorder: GlobalMetricRecorder = try di.get()
+        let specificMetricRecorderProvider: SpecificMetricRecorderProvider = try di.get()
         
         let cacheElementTimeToLive = TimeUnit.hours(1)
         let cacheMaximumSize = 20 * 1024 * 1024 * 1024
         let logsTimeToLive = TimeUnit.days(14)
         
         let logCleaningQueue = OperationQueue()
-        try setupLogging(di: di, logsTimeToLive: logsTimeToLive, queue: logCleaningQueue)
+        di.set(
+            LoggingSetup(
+                dateProvider: try di.get(),
+                fileSystem: try di.get()
+            )
+        )
+        
+        let logger = try setupLogging(di: di, logsTimeToLive: logsTimeToLive, queue: logCleaningQueue)
+            .withMetadata(key: .hostname, value: LocalHostDeterminer.currentHostAddress)
+            .withMetadata(key: .emceeVersion, value: EmceeVersion.version.value)
+            .withMetadata(key: .processId, value: "\(ProcessInfo.processInfo.processIdentifier)")
+            .withMetadata(key: .processName, value: ProcessInfo.processInfo.processName)
+        di.set(logger)
         
         defer {
             let timeout: TimeInterval = 10
             LoggingSetup.tearDown(timeout: timeout)
-            metricRecorder.tearDown(timeout: timeout)
+            specificMetricRecorderProvider.tearDown(timeout: timeout)
+            globalMetricRecorder.tearDown(timeout: timeout)
             logCleaningQueue.waitUntilAllOperationsAreFinished()
         }
         
-        Logger.info("Arguments: \(ProcessInfo.processInfo.arguments)")
+        logger.info("Arguments: \(ProcessInfo.processInfo.arguments)")
 
         di.set(
-            DefaultProcessControllerProvider(
-                dateProvider: try di.get(),
-                fileSystem: try di.get()
-            ),
+            try DetailedActivityLoggableProcessControllerProvider(di: di),
             for: ProcessControllerProvider.self
         )
         
@@ -70,7 +102,9 @@ public final class InProcessMain {
         )
         
         di.set(
-            DefaultRequestSenderProvider(),
+            DefaultRequestSenderProvider(
+                logger: logger
+            ),
             for: RequestSenderProvider.self
         )
         
@@ -92,6 +126,7 @@ public final class InProcessMain {
         di.set(
             URLResourceImpl(
                 fileCache: try di.get(),
+                logger: logger,
                 urlSession: URLSession.shared
             ),
             for: URLResource.self
@@ -100,6 +135,7 @@ public final class InProcessMain {
         di.set(
             ResourceLocationResolverImpl(
                 fileSystem: try di.get(),
+                logger: logger,
                 urlResource: try di.get(),
                 cacheElementTimeToLive: cacheElementTimeToLive.timeInterval,
                 maximumCacheSize: cacheMaximumSize,
@@ -110,6 +146,7 @@ public final class InProcessMain {
         
         di.set(
             PluginEventBusProviderImpl(
+                logger: logger,
                 processControllerProvider: try di.get(),
                 resourceLocationResolver: try di.get()
             ),
@@ -137,10 +174,10 @@ public final class InProcessMain {
         
         let commandInvoker = CommandInvoker(
             commands: [
-                DistWorkCommand(di: di),
-                DumpCommand(di: di),
-                RunTestsOnRemoteQueueCommand(di: di),
-                StartQueueServerCommand(di: di),
+                try DistWorkCommand(di: di),
+                try DumpCommand(di: di),
+                try RunTestsOnRemoteQueueCommand(di: di),
+                try StartQueueServerCommand(di: di),
                 try KickstartCommand(di: di),
                 try EnableWorkerCommand(di: di),
                 try DisableWorkerCommand(di: di),
@@ -149,40 +186,30 @@ public final class InProcessMain {
             ],
             helpCommandType: .generateAutomatically
         )
-        try commandInvoker.invokeSuitableCommand()
+        let invokableCommand = try commandInvoker.invokableCommand()
+        
+        di.set(
+            try di.get(ContextualLogger.self).withMetadata(key: .emceeCommand, value: invokableCommand.command.name)
+        )
+        
+        try invokableCommand.invoke()
     }
     
-    private func setupMetrics(di: DI) {
-        let metricRecorder = MetricRecorderImpl(
-            graphiteMetricHandler: NoOpMetricHandler(),
-            statsdMetricHandler: NoOpMetricHandler()
-        )
-        di.set(
-            metricRecorder,
-            for: MutableMetricRecorder.self
-        )
-        di.set(
-            metricRecorder,
-            for: MetricRecorder.self
-        )
-    }
-    
-    private func setupLogging(di: DI, logsTimeToLive: TimeUnit, queue: OperationQueue) throws {
-        let loggingSetup = LoggingSetup(
-            dateProvider: try di.get(),
-            fileSystem: try di.get()
-        )
-        try loggingSetup.setupLogging(stderrVerbosity: Verbosity.info)
+    private func setupLogging(di: DI, logsTimeToLive: TimeUnit, queue: OperationQueue) throws -> ContextualLogger {
+        let loggingSetup: LoggingSetup = try di.get()
+        let logger = try loggingSetup.setupLogging(stderrVerbosity: .info)
+        
         try loggingSetup.cleanUpLogs(
+            logger: logger,
             olderThan: try di.get(DateProvider.self).currentDate().addingTimeInterval(-logsTimeToLive.timeInterval),
             queue: queue,
             completion: { error in
                 if let error = error {
-                    Logger.error("Failed to clean up old logs: \(error)")
-                } else {
-                    Logger.info("Logs clean up complete")
+                    logger.error("Failed to clean up old logs: \(error)")
                 }
             }
         )
+        
+        return logger
     }
 }

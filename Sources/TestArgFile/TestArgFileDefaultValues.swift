@@ -2,6 +2,7 @@ import BuildArtifacts
 import DeveloperDirModels
 import Foundation
 import LoggingSetup
+import MetricsExtensions
 import PluginSupport
 import QueueModels
 import RunnerModels
@@ -41,16 +42,11 @@ public enum TestArgFileDefaultValues {
         ),
         watchdogSettings: WatchdogSettings(bundleIds: [], timeout: 20)
     )
-    public static let testRunnerTool: TestRunnerTool = .xcodebuild(nil)
+    public static let testRunnerTool: TestRunnerTool = .xcodebuild
     public static let testTimeoutConfiguration = TestTimeoutConfiguration(
         singleTestMaximumDuration: 180,
         testRunnerMaximumSilenceDuration: 60
     )
     public static let workerCapabilityRequirements: Set<WorkerCapabilityRequirement> = []
-    public static let persistentMetricsJobId: String = "UnidentifiedJob"
-    public static let analyticsConfiguration = AnalyticsConfiguration(
-        graphiteConfiguration: nil,
-        statsdConfiguration: nil,
-        sentryConfiguration: nil
-    )
+    public static let analyticsConfiguration = AnalyticsConfiguration()
 }

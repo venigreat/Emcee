@@ -31,14 +31,14 @@ public final class MultipleQueuesEnqueueableBucketReceptor: EnqueueableBucketRec
                 
                 multipleQueuesContainer.add(
                     runningJobQueue: JobQueue(
+                        analyticsConfiguration: prioritizedJob.analyticsConfiguration,
                         bucketQueue: bucketQueue,
                         job: Job(creationTime: Date(), jobId: prioritizedJob.jobId, priority: prioritizedJob.jobPriority),
                         jobGroup: fetchOrCreateJobGroup(
                             jobGroupId: prioritizedJob.jobGroupId,
                             jobGroupPriority: prioritizedJob.jobGroupPriority
                         ),
-                        resultsCollector: ResultsCollector(),
-                        persistentMetricsJobId: prioritizedJob.persistentMetricsJobId
+                        resultsCollector: ResultsCollector()
                     )
                 )
                 multipleQueuesContainer.removeFromDeleted(jobId: prioritizedJob.jobId)

@@ -1,8 +1,9 @@
 import DateProvider
 import Foundation
 import LocalHostDeterminer
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import QueueModels
 import RunnerModels
 import SimulatorPoolModels
@@ -23,11 +24,14 @@ public final class AllocatedSimulator {
 public extension SimulatorPool {
     func allocateSimulator(
         dateProvider: DateProvider,
+        logger: ContextualLogger,
         simulatorOperationTimeouts: SimulatorOperationTimeouts,
         version: Version,
-        metricRecorder: MetricRecorder
+        globalMetricRecorder: GlobalMetricRecorder
     ) throws -> AllocatedSimulator {
-        try TimeMeasurerImpl(
+        let logger = logger
+        
+        return try TimeMeasurerImpl(
             dateProvider: dateProvider
         ).measure(
             work: {
@@ -40,13 +44,13 @@ public extension SimulatorPool {
                         releaseSimulator: { self.free(simulatorController: simulatorController) }
                     )
                 } catch {
-                    Logger.error("Failed to get booted simulator: \(error)")
+                    logger.error("Failed to get booted simulator: \(error)")
                     try simulatorController.deleteSimulator()
                     throw error
                 }
             },
             result: { error, duration in
-                metricRecorder.capture(
+                globalMetricRecorder.capture(
                     SimulatorAllocationDurationMetric(
                         host: LocalHostDeterminer.currentHostAddress,
                         duration: duration,

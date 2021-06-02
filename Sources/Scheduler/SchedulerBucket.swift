@@ -1,12 +1,14 @@
 import BuildArtifacts
 import DeveloperDirModels
 import Foundation
+import MetricsExtensions
 import PluginSupport
 import QueueModels
 import SimulatorPoolModels
 import RunnerModels
 
 public struct SchedulerBucket: CustomStringConvertible, Equatable {
+    public let analyticsConfiguration: AnalyticsConfiguration
     public let bucketId: BucketId
     public let buildArtifacts: BuildArtifacts
     public let developerDir: DeveloperDir
@@ -20,7 +22,6 @@ public struct SchedulerBucket: CustomStringConvertible, Equatable {
     public let testRunnerTool: TestRunnerTool
     public let testTimeoutConfiguration: TestTimeoutConfiguration
     public let testType: TestType
-    public let persistentMetricsJobId: String
     
     public var description: String {
         var result = [String]()
@@ -38,12 +39,12 @@ public struct SchedulerBucket: CustomStringConvertible, Equatable {
         result.append("testRunnerTool: \(testRunnerTool)")
         result.append("testTimeoutConfiguration: \(testTimeoutConfiguration)")
         result.append("testType: \(testType)")
-        result.append("persistentMetricsJobId: \(persistentMetricsJobId)")
         
         return "<\((type(of: self))) " + result.joined(separator: " ") + ">"
     }
 
     public init(
+        analyticsConfiguration: AnalyticsConfiguration,
         bucketId: BucketId,
         buildArtifacts: BuildArtifacts,
         developerDir: DeveloperDir,
@@ -56,9 +57,9 @@ public struct SchedulerBucket: CustomStringConvertible, Equatable {
         testExecutionBehavior: TestExecutionBehavior,
         testRunnerTool: TestRunnerTool,
         testTimeoutConfiguration: TestTimeoutConfiguration,
-        testType: TestType,
-        persistentMetricsJobId: String
+        testType: TestType
     ) {
+        self.analyticsConfiguration = analyticsConfiguration
         self.bucketId = bucketId
         self.buildArtifacts = buildArtifacts
         self.developerDir = developerDir
@@ -72,11 +73,11 @@ public struct SchedulerBucket: CustomStringConvertible, Equatable {
         self.testRunnerTool = testRunnerTool
         self.testTimeoutConfiguration = testTimeoutConfiguration
         self.testType = testType
-        self.persistentMetricsJobId = persistentMetricsJobId
     }
     
     public static func from(bucket: Bucket, testExecutionBehavior: TestExecutionBehavior) -> SchedulerBucket {
         return SchedulerBucket(
+            analyticsConfiguration: bucket.analyticsConfiguration,
             bucketId: bucket.bucketId,
             buildArtifacts: bucket.buildArtifacts,
             developerDir: bucket.developerDir,
@@ -89,8 +90,7 @@ public struct SchedulerBucket: CustomStringConvertible, Equatable {
             testExecutionBehavior: testExecutionBehavior,
             testRunnerTool: bucket.testRunnerTool,
             testTimeoutConfiguration: bucket.testTimeoutConfiguration,
-            testType: bucket.testType,
-            persistentMetricsJobId: bucket.persistentMetricsJobId
+            testType: bucket.testType
         )
     }
 }

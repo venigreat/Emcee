@@ -1,11 +1,10 @@
 import DeveloperDirLocator
 import DeveloperDirModels
 import Foundation
-import Logging
 import PlistLib
 import ProcessController
 import SimulatorPoolModels
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 public final class SimulatorSettingsModifierImpl: SimulatorSettingsModifier {
@@ -31,7 +30,7 @@ public final class SimulatorSettingsModifierImpl: SimulatorSettingsModifier {
         simulatorSettings: SimulatorSettings,
         toSimulator simulator: Simulator
     ) throws {
-        let environment = try developerDirLocator.suitableEnvironment(forDeveloperDir: developerDir)
+        let environment = Environment(try developerDirLocator.suitableEnvironment(forDeveloperDir: developerDir))
         var didImportPlist = false
         
         let globalPreferencesPlist = Plist(
@@ -91,7 +90,7 @@ public final class SimulatorSettingsModifierImpl: SimulatorSettingsModifier {
     private func importDefaults(
         domain: String,
         plistToImport: Plist,
-        environment: [String: String],
+        environment: Environment,
         simulator: Simulator
     ) throws -> Bool {
         let uniqueId = uniqueIdentifierGenerator.generate()
@@ -110,7 +109,8 @@ public final class SimulatorSettingsModifierImpl: SimulatorSettingsModifier {
         
         try processControllerProvider.startAndWaitForSuccessfulTermination(
             arguments: ["/usr/bin/xcrun", "simctl", "--set", simulator.simulatorSetPath, "spawn", simulator.udid.value, "defaults", "export", domain, currentPlistFilePath.pathString],
-            environment: environment
+            environment: environment,
+            automaticManagement: .sigtermThenKillIfSilent(interval: 30)
         )
         
         let entriesInCurrentPlist: [String: PlistEntry]
@@ -125,25 +125,26 @@ public final class SimulatorSettingsModifierImpl: SimulatorSettingsModifier {
             entriesInCurrentPlist = [:]
         }
         if try plistToImport.root.plistEntry.dictEntry() == entriesInCurrentPlist {
-            Logger.debug("Will not import plist for domain \(domain) of simulator \(simulator): current plist already has correct data")
             return false
         }
         
         try processControllerProvider.startAndWaitForSuccessfulTermination(
             arguments: ["/usr/bin/xcrun", "simctl", "--set", simulator.simulatorSetPath, "spawn", simulator.udid.value, "defaults", "import", domain, pathToPlistToImport.pathString],
-            environment: environment
+            environment: environment,
+            automaticManagement: .sigtermThenKillIfSilent(interval: 30)
         )
         return true
     }
     
     private func kill(
         daemon: String,
-        environment: [String: String],
+        environment: Environment,
         simulator: Simulator
     ) throws {
         try processControllerProvider.startAndWaitForSuccessfulTermination(
             arguments: ["/usr/bin/xcrun", "simctl", "--set", simulator.simulatorSetPath, "spawn", simulator.udid.value, "launchctl", "kill", "SIGKILL", "system/" + daemon],
-            environment: environment
+            environment: environment,
+            automaticManagement: .sigtermThenKillIfSilent(interval: 30)
         )
     }
 }
@@ -151,12 +152,14 @@ public final class SimulatorSettingsModifierImpl: SimulatorSettingsModifier {
 extension ProcessControllerProvider {
     func startAndWaitForSuccessfulTermination(
         arguments: [SubprocessArgument],
-        environment: [String: String]
+        environment: Environment,
+        automaticManagement: AutomaticManagement = .noManagement
     ) throws {
         try createProcessController(
             subprocess: Subprocess(
                 arguments: arguments,
-                environment: environment
+                environment: environment,
+                automaticManagement: automaticManagement
             )
         ).startAndWaitForSuccessfulTermination()
     }

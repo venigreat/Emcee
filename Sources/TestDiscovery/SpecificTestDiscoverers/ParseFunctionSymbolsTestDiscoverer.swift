@@ -3,7 +3,7 @@ import BuildArtifacts
 import DeveloperDirLocator
 import DeveloperDirModels
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 import PluginManager
 import ProcessController
@@ -13,7 +13,7 @@ import RunnerModels
 import SimulatorPool
 import SimulatorPoolModels
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 final class ParseFunctionSymbolsTestDiscoverer: SpecificTestDiscoverer {
@@ -40,24 +40,22 @@ final class ParseFunctionSymbolsTestDiscoverer: SpecificTestDiscoverer {
     func discoverTestEntries(
         configuration: TestDiscoveryConfiguration
     ) throws -> [DiscoveredTestEntry] {
-        let nmOutputPath = try tempFolder.pathByCreatingDirectories(components: [uniqueIdentifierGenerator.generate()])
         let nmProcess = try processControllerProvider.createProcessController(
             subprocess: Subprocess(
                 arguments: [
                     "/usr/bin/nm", "-j", "-U",
                     try testBinaryPath(xcTestBundleLocation: configuration.xcTestBundleLocation)
-                ],
-                standardStreamsCaptureConfig: StandardStreamsCaptureConfig(
-                    stdoutPath: nmOutputPath.appending(component: "nm_stdout"),
-                    stderrPath: nmOutputPath.appending(component: "nm_stderr")
-                )
+                ]
             )
         )
+        var nmOutputData = Data()
+        nmProcess.onStdout { _, data, _ in nmOutputData.append(data) }
         try nmProcess.startAndWaitForSuccessfulTermination()
         
         return try convert(
             developerDir: configuration.developerDir,
-            nmOutput: nmProcess.subprocess.standardStreamsCaptureConfig.stdoutOutputPath()
+            nmOutputData: nmOutputData,
+            logger: configuration.logger
         )
     }
     
@@ -83,9 +81,13 @@ final class ParseFunctionSymbolsTestDiscoverer: SpecificTestDiscoverer {
         return resourcePath.appending(component: executableName)
     }
     
-    private func convert(developerDir: DeveloperDir, nmOutput: AbsolutePath) throws -> [DiscoveredTestEntry] {
-        guard let string = String(data: try Data(contentsOf: nmOutput.fileUrl), encoding: .utf8) else {
-            Logger.error("Failed to load contents of nm output at \(nmOutput)")
+    private func convert(
+        developerDir: DeveloperDir,
+        nmOutputData: Data,
+        logger: ContextualLogger
+    ) throws -> [DiscoveredTestEntry] {
+        guard let string = String(data: nmOutputData, encoding: .utf8) else {
+            logger.error("Failed to get contents of nm output from \(nmOutputData.count) bytes")
             return []
         }
         
@@ -96,11 +98,15 @@ final class ParseFunctionSymbolsTestDiscoverer: SpecificTestDiscoverer {
         )
         
         return try string.split(separator: "\n").compactMap {
-            try demangleAndCompactMap(string: String($0), demangler: demangler)
+            try demangleAndCompactMap(string: String($0), demangler: demangler, logger: logger)
         }
     }
     
-    private func demangleAndCompactMap(string: String, demangler: Demangler) throws -> DiscoveredTestEntry? {
+    private func demangleAndCompactMap(
+        string: String,
+        demangler: Demangler,
+        logger: ContextualLogger
+    ) throws -> DiscoveredTestEntry? {
         guard let demangledString = try demangler.demangle(string: string) else {
             return nil
         }
@@ -131,7 +137,7 @@ final class ParseFunctionSymbolsTestDiscoverer: SpecificTestDiscoverer {
         }
         
         let components = try TestNameParser.components(moduledTestName: moduledTestName)
-        Logger.debug("Extracted components: moduleName \(components.module), className \(components.className), methodName \(components.methodName)")
+        logger.debug("Extracted components: moduleName \(components.module), className \(components.className), methodName \(components.methodName)")
         
         guard components.methodName.hasPrefix("test") else {
             return nil
@@ -143,7 +149,6 @@ final class ParseFunctionSymbolsTestDiscoverer: SpecificTestDiscoverer {
             testMethods: [components.methodName], caseId: nil,
             tags: []
         )
-        Logger.debug("Discovered test entry: \(discoveredTestEntry)")
         return discoveredTestEntry
     }
 }

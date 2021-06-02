@@ -1,7 +1,7 @@
 import Dispatch
 import DistWorkerModels
 import Foundation
-import Logging
+import EmceeLogging
 import QueueModels
 import RESTInterfaces
 import RESTMethods
@@ -45,8 +45,6 @@ public final class KickstartWorkerEndpoint: RESTEndpoint {
         guard !workerAliveness.registered || workerAliveness.silent else {
             throw KickstartError.isAlive(payload.workerId)
         }
-        
-        Logger.debug("Request to kickstart \(payload.workerId)")
         
         try onDemandWorkerStarter.start(workerId: payload.workerId)
         

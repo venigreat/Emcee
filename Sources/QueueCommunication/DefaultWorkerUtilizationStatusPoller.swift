@@ -1,8 +1,9 @@
 import AtomicModels
 import Deployer
 import LocalHostDeterminer
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import QueueCommunicationModels
 import QueueModels
 import Timer
@@ -11,44 +12,47 @@ public class DefaultWorkerUtilizationStatusPoller: WorkerUtilizationStatusPoller
     private let communicationService: QueueCommunicationService
     private let defaultDeployments: [DeploymentDestination]
     private let emceeVersion: Version
-    private let metricRecorder: MetricRecorder
+    private let logger: ContextualLogger
+    private let globalMetricRecorder: GlobalMetricRecorder
     private let pollingTrigger = DispatchBasedTimer(repeating: .seconds(60), leeway: .seconds(10))
     private let queueHost: String
-    private var workerIdsToUtilize: AtomicValue<Set<WorkerId>>
+    private let workerIdsToUtilize: AtomicValue<Set<WorkerId>>
     
     public init(
         communicationService: QueueCommunicationService,
         defaultDeployments: [DeploymentDestination],
         emceeVersion: Version,
-        metricRecorder: MetricRecorder,
+        logger: ContextualLogger,
+        globalMetricRecorder: GlobalMetricRecorder,
         queueHost: String
     ) {
         self.communicationService = communicationService
         self.defaultDeployments = defaultDeployments
         self.emceeVersion = emceeVersion
-        self.metricRecorder = metricRecorder
+        self.logger = logger
+        self.globalMetricRecorder = globalMetricRecorder
         self.queueHost = queueHost
         self.workerIdsToUtilize = AtomicValue(Set(defaultDeployments.workerIds()))
-        metricRecorder.capture(
-            NumberOfWorkersToUtilizeMetric(emceeVersion: emceeVersion, queueHost: queueHost, workersCount: defaultDeployments.count)
-        )
+        reportMetric()
     }
     
     public func startPolling() {
-        Logger.debug("Starting polling workers to utilize")
+        logger.debug("Starting polling workers to utilize")
         pollingTrigger.start { [weak self] timer in
-            Logger.debug("Fetching workers to utilize")
-            self?.fetchWorkersToUtilize()
+            guard let strongSelf = self else {
+                return timer.stop()
+            }
+            
+            strongSelf.logger.debug("Fetching workers to utilize")
+            strongSelf.fetchWorkersToUtilize()
         }
     }
     
     public func stopPollingAndRestoreDefaultConfig() {
-        Logger.debug("Stopping polling workers to utilize")
+        logger.debug("Stopping polling workers to utilize")
         pollingTrigger.stop()
-        self.workerIdsToUtilize.set(Set(defaultDeployments.workerIds()))
-        metricRecorder.capture(
-            NumberOfWorkersToUtilizeMetric(emceeVersion: emceeVersion, queueHost: queueHost, workersCount: defaultDeployments.count)
-        )
+        workerIdsToUtilize.set(Set(defaultDeployments.workerIds()))
+        reportMetric()
     }
     
     private func fetchWorkersToUtilize() {
@@ -61,24 +65,26 @@ public class DefaultWorkerUtilizationStatusPoller: WorkerUtilizationStatusPoller
                 
                 do {
                     let workerIds = try result.dematerialize()
-                    Logger.debug("Fetched workerIds to utilize: \(workerIds)")
+                    strongSelf.logger.debug("Fetched workerIds to utilize: \(workerIds)")
                     strongSelf.workerIdsToUtilize.set(workerIds)
-                    strongSelf.metricRecorder.capture(
-                        NumberOfWorkersToUtilizeMetric(
-                            emceeVersion: strongSelf.emceeVersion,
-                            queueHost: strongSelf.queueHost,
-                            workersCount: workerIds.count
-                        )
-                    )
+                    strongSelf.reportMetric()
                 } catch {
-                    Logger.error("Failed to fetch workers to utilize: \(error)")
+                    strongSelf.logger.error("Failed to fetch workers to utilize: \(error)")
                 }
         })
     }
     
     public func utilizationPermissionForWorker(workerId: WorkerId) -> WorkerUtilizationPermission {
-        return workerIdsToUtilize.withExclusiveAccess { workerIds in
-            return workerIds.contains(workerId) ? .allowedToUtilize : .notAllowedToUtilize
-        }
+        workerIdsToUtilize.currentValue().contains(workerId) ? .allowedToUtilize : .notAllowedToUtilize
+    }
+    
+    private func reportMetric() {
+        globalMetricRecorder.capture(
+            NumberOfWorkersToUtilizeMetric(
+                emceeVersion: emceeVersion,
+                queueHost: queueHost,
+                workersCount: workerIdsToUtilize.currentValue().count
+            )
+        )
     }
 }

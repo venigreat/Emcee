@@ -1,5 +1,5 @@
 import Foundation
-import Logging
+import EmceeLogging
 
 public protocol OnDemandSimulatorPool {
     func pool(key: OnDemandSimulatorPoolKey) throws -> SimulatorPool
@@ -10,7 +10,6 @@ public protocol OnDemandSimulatorPool {
 public extension OnDemandSimulatorPool {
     func deleteSimulators() {
         enumeratePools { (key: OnDemandSimulatorPoolKey, pool: SimulatorPool) in
-            Logger.debug("Deleting simulators in pool \(key)")
             pool.deleteSimulators()
         }
     }

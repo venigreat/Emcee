@@ -1,9 +1,10 @@
 import EventBus
-import Logging
+import EmceeLogging
+import MetricsExtensions
 import ResourceLocationResolver
 import RunnerModels
 import SimulatorPool
-import TemporaryStuff
+import Tmp
 import TestArgFile
 import TestDiscovery
 
@@ -11,28 +12,32 @@ public final class TestEntriesValidator {
     private let remoteCache: RuntimeDumpRemoteCache
     private let testArgFileEntries: [TestArgFileEntry]
     private let testDiscoveryQuerier: TestDiscoveryQuerier
-    private let persistentMetricsJobId: String
+    private let analyticsConfiguration: AnalyticsConfiguration
     private let transformer = TestToRunIntoTestEntryTransformer()
 
     public init(
         remoteCache: RuntimeDumpRemoteCache,
         testArgFileEntries: [TestArgFileEntry],
         testDiscoveryQuerier: TestDiscoveryQuerier,
-        persistentMetricsJobId: String
+        analyticsConfiguration: AnalyticsConfiguration
     ) {
         self.remoteCache = remoteCache
         self.testArgFileEntries = testArgFileEntries
         self.testDiscoveryQuerier = testDiscoveryQuerier
-        self.persistentMetricsJobId = persistentMetricsJobId
+        self.analyticsConfiguration = analyticsConfiguration
     }
     
     public func validatedTestEntries(
+        logger: ContextualLogger,
         intermediateResult: (TestArgFileEntry, [ValidatedTestEntry]) throws -> ()
     ) throws -> [ValidatedTestEntry] {
         var result = [ValidatedTestEntry]()
         
         for testArgFileEntry in testArgFileEntries {
-            let validatedTestEntries = try self.validatedTestEntries(testArgFileEntry: testArgFileEntry)
+            let validatedTestEntries = try self.validatedTestEntries(
+                logger: logger,
+                testArgFileEntry: testArgFileEntry
+            )
             try intermediateResult(testArgFileEntry, validatedTestEntries)
             result.append(contentsOf: validatedTestEntries)
         }
@@ -41,9 +46,11 @@ public final class TestEntriesValidator {
     }
 
     private func validatedTestEntries(
+        logger: ContextualLogger,
         testArgFileEntry: TestArgFileEntry
     ) throws -> [ValidatedTestEntry] {
         let configuration = TestDiscoveryConfiguration(
+            analyticsConfiguration: analyticsConfiguration,
             developerDir: testArgFileEntry.developerDir,
             pluginLocations: testArgFileEntry.pluginLocations,
             testDiscoveryMode: try TestDiscoveryModeDeterminer.testDiscoveryMode(
@@ -60,8 +67,8 @@ public final class TestEntriesValidator {
             testTimeoutConfiguration: testTimeoutConfigurationForRuntimeDump,
             testsToValidate: testArgFileEntry.testsToRun,
             xcTestBundleLocation: testArgFileEntry.buildArtifacts.xcTestBundle.location,
-            persistentMetricsJobId: persistentMetricsJobId,
-            remoteCache: remoteCache
+            remoteCache: remoteCache,
+            logger: logger
         )
 
         return try transformer.transform(

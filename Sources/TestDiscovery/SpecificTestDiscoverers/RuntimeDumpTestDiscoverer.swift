@@ -3,8 +3,9 @@ import DateProvider
 import DeveloperDirLocator
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import PathLib
 import PluginManager
 import QueueModels
@@ -14,7 +15,7 @@ import RunnerModels
 import SimulatorPool
 import SimulatorPoolModels
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
@@ -34,7 +35,8 @@ final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
     private let uniqueIdentifierGenerator: UniqueIdentifierGenerator
     private let version: Version
     private let waiter: Waiter
-    private let metricRecorder: MetricRecorder
+    private let globalMetricRecorder: GlobalMetricRecorder
+    private let specificMetricRecorder: SpecificMetricRecorder
     
     init(
         buildArtifacts: BuildArtifacts,
@@ -53,7 +55,8 @@ final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
         uniqueIdentifierGenerator: UniqueIdentifierGenerator,
         version: Version,
         waiter: Waiter,
-        metricRecorder: MetricRecorder
+        globalMetricRecorder: GlobalMetricRecorder,
+        specificMetricRecorder: SpecificMetricRecorder
     ) {
         self.buildArtifacts = buildArtifacts
         self.dateProvider = dateProvider
@@ -71,14 +74,15 @@ final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
         self.uniqueIdentifierGenerator = uniqueIdentifierGenerator
         self.version = version
         self.waiter = waiter
-        self.metricRecorder = metricRecorder
+        self.globalMetricRecorder = globalMetricRecorder
+        self.specificMetricRecorder = specificMetricRecorder
     }
     
     func discoverTestEntries(
         configuration: TestDiscoveryConfiguration
     ) throws -> [DiscoveredTestEntry] {
         let runtimeEntriesJSONPath = tempFolder.pathWith(components: [uniqueIdentifierGenerator.generate()])
-        Logger.debug("Will dump runtime tests into file: \(runtimeEntriesJSONPath)")
+        configuration.logger.debug("Will dump runtime tests into file: \(runtimeEntriesJSONPath)")
         
         let runnerConfiguration = buildRunnerConfiguration(
             buildArtifacts: buildArtifacts,
@@ -91,33 +95,35 @@ final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
             dateProvider: dateProvider,
             developerDirLocator: developerDirLocator,
             fileSystem: fileSystem,
+            logger: configuration.logger,
+            persistentMetricsJobId: configuration.analyticsConfiguration.persistentMetricsJobId,
             pluginEventBusProvider: pluginEventBusProvider,
             resourceLocationResolver: resourceLocationResolver,
+            specificMetricRecorder: specificMetricRecorder,
             tempFolder: tempFolder,
             testRunnerProvider: testRunnerProvider,
+            uniqueIdentifierGenerator: uniqueIdentifierGenerator,
             version: version,
-            persistentMetricsJobId: configuration.persistentMetricsJobId,
-            metricRecorder: metricRecorder,
             waiter: waiter
         )
         
-        return try runRetrying(times: numberOfAttemptsToPerformRuntimeDump) {
+        return try runRetrying(logger: configuration.logger, times: numberOfAttemptsToPerformRuntimeDump) {
             let allocatedSimulator = try simulatorForTestDiscovery(
                 configuration: configuration,
                 simulatorControlTool: simulatorControlTool
             )
             defer { allocatedSimulator.releaseSimulator() }
             
-            let runnerRunResult = try runner.runOnce(
+            _ = try runner.runOnce(
                 entriesToRun: [testEntryToQueryRuntimeDump],
                 developerDir: configuration.developerDir,
-                simulator: allocatedSimulator.simulator
+                simulator: allocatedSimulator.simulator,
+                lostTestProcessingMode: .reportError
             )
             
             guard let data = try? Data(contentsOf: runtimeEntriesJSONPath.fileUrl),
                 let foundTestEntries = try? JSONDecoder().decode([DiscoveredTestEntry].self, from: data)
                 else {
-                    runnerRunResult.dumpStandardStreams()
                     throw TestExplorationError.fileNotFound(runtimeEntriesJSONPath)
             }
             
@@ -125,12 +131,12 @@ final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
         }
     }
     
-    private func runRetrying<T>(times: UInt, _ work: () throws -> T) rethrows -> T {
+    private func runRetrying<T>(logger: ContextualLogger, times: UInt, _ work: () throws -> T) rethrows -> T {
         for retryIndex in 0 ..< times {
             do {
                 return try work()
             } catch {
-                Logger.error("Failed to get runtime dump, error: \(error)")
+                logger.error("Failed to get runtime dump, error: \(error)")
                 waiter.wait(timeout: TimeInterval(retryIndex) * 2.0, description: "Pause between runtime dump retries")
             }
         }
@@ -170,9 +176,10 @@ final class RuntimeDumpTestDiscoverer: SpecificTestDiscoverer {
         )
         return try simulatorPool.allocateSimulator(
             dateProvider: dateProvider,
+            logger: configuration.logger,
             simulatorOperationTimeouts: configuration.simulatorOperationTimeouts,
             version: version,
-            metricRecorder: metricRecorder
+            globalMetricRecorder: globalMetricRecorder
         )
     }
     

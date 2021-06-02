@@ -2,16 +2,17 @@ import DateProvider
 import FileCache
 import FileSystem
 import Foundation
-import Logging
+import EmceeLogging
 import PathLib
 import ProcessController
 import ResourceLocation
 import ResourceLocationResolver
 import Swifter
 import SynchronousWaiter
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import URLResource
+import URLSessionTestHelpers
 import XCTest
 
 final class ResourceLocationResolverTests: XCTestCase {
@@ -187,6 +188,7 @@ final class ResourceLocationResolverTests: XCTestCase {
     let dateProvider = SystemDateProvider()
     lazy var resolver = ResourceLocationResolverImpl(
         fileSystem: fileSystem,
+        logger: .noOp,
         urlResource: urlResource,
         cacheElementTimeToLive: 0,
         maximumCacheSize: 0,
@@ -205,7 +207,11 @@ final class ResourceLocationResolverTests: XCTestCase {
             fileSystem: fileSystem
         )
     }
-    lazy var urlResource = URLResourceImpl(fileCache: fileCache, urlSession: urlSession)
+    lazy var urlResource = URLResourceImpl(
+        fileCache: fileCache,
+        logger: .noOp,
+        urlSession: urlSession
+    )
     lazy var smallFile = assertDoesNotThrow { try createFile(name: "example", size: 4096) }
     lazy var smallZipFile = self.zipFile(toPath: serverFolder.appending(component: "example.zip"), fromPath: smallFile)
     lazy var largeFile = assertDoesNotThrow { try createFile(name: "example", size: 12000000) }

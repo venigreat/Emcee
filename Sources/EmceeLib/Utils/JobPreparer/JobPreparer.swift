@@ -1,8 +1,9 @@
 import DI
 import Dispatch
 import Foundation
-import Logging
+import EmceeLogging
 import Metrics
+import MetricsExtensions
 import QueueClient
 import QueueModels
 import RequestSender
@@ -38,7 +39,7 @@ public final class JobPreparer {
                 try? reportJobPreparationDuration(
                     duration: duration,
                     emceeVersion: emceeVersion,
-                    persistentMetricsJobId: testArgFile.prioritizedJob.persistentMetricsJobId,
+                    analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration,
                     queueHost: queueServerAddress.host,
                     successful: error == nil
                 )
@@ -55,19 +56,23 @@ public final class JobPreparer {
             remoteCache: try di.get(RuntimeDumpRemoteCacheProvider.self).remoteCache(config: remoteCacheConfig),
             testArgFileEntries: testArgFile.entries,
             testDiscoveryQuerier: try di.get(),
-            persistentMetricsJobId: testArgFile.prioritizedJob.persistentMetricsJobId
+            analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration
         )
         
-        _ = try testEntriesValidator.validatedTestEntries { testArgFileEntry, validatedTestEntry in
+        let logger = try di.get(ContextualLogger.self)
+
+        _ = try testEntriesValidator.validatedTestEntries(logger: logger) { testArgFileEntry, validatedTestEntry in
             let testEntryConfigurationGenerator = TestEntryConfigurationGenerator(
+                analyticsConfiguration: testArgFile.prioritizedJob.analyticsConfiguration,
                 validatedEntries: validatedTestEntry,
                 testArgFileEntry: testArgFileEntry,
-                persistentMetricsJobId: testArgFile.prioritizedJob.persistentMetricsJobId
+                logger: logger
             )
             let testEntryConfigurations = testEntryConfigurationGenerator.createTestEntryConfigurations()
-            Logger.info("Will schedule \(testEntryConfigurations.count) tests to queue server at \(queueServerAddress)")
+            logger.info("Will schedule \(testEntryConfigurations.count) tests to queue server at \(queueServerAddress)")
             
             let testScheduler = TestSchedulerImpl(
+                logger: logger,
                 requestSender: try di.get(RequestSenderProvider.self).requestSender(socketAddress: queueServerAddress)
             )
             
@@ -86,18 +91,22 @@ public final class JobPreparer {
     private func reportJobPreparationDuration(
         duration: TimeInterval,
         emceeVersion: Version,
-        persistentMetricsJobId: String,
+        analyticsConfiguration: AnalyticsConfiguration,
         queueHost: String,
         successful: Bool
     ) throws {
-        try di.get(MetricRecorder.self).capture(
-            JobPreparationDurationMetric(
-                queueHost: queueHost,
-                version: emceeVersion,
-                persistentMetricsJobId: persistentMetricsJobId,
-                successful: successful,
-                duration: duration
+        if let persistentMetricsJobId = analyticsConfiguration.persistentMetricsJobId {
+            try di.get(SpecificMetricRecorderProvider.self).specificMetricRecorder(
+                analyticsConfiguration: analyticsConfiguration
+            ).capture(
+                JobPreparationDurationMetric(
+                    queueHost: queueHost,
+                    version: emceeVersion,
+                    persistentMetricsJobId: persistentMetricsJobId,
+                    successful: successful,
+                    duration: duration
+                )
             )
-        )
+        }
     }
 }

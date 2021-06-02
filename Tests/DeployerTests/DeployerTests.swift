@@ -3,7 +3,7 @@ import Foundation
 import PathLib
 import ProcessController
 import ProcessControllerTestHelpers
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGeneratorTestHelpers
 import XCTest
 
@@ -33,7 +33,8 @@ class DeployerTests: XCTestCase {
                 key: "key",
                 remoteDeploymentPath: "/remote/path"
             ),
-            processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder) { subprocess -> ProcessController in
+            logger: .noOp,
+            processControllerProvider: FakeProcessControllerProvider { subprocess -> ProcessController in
                 XCTAssertEqual(
                     try subprocess.arguments.map { try $0.stringValue() },
                     ["/usr/bin/zip", self.tempFolder.pathWith(components: ["fixed", "simple_file"]).pathString, "-r", "."]
@@ -75,7 +76,8 @@ class DeployerTests: XCTestCase {
                     key: "key",
                     remoteDeploymentPath: "/remote/path"
                 ),
-                processControllerProvider: FakeProcessControllerProvider(tempFolder: self.tempFolder),
+                logger: .noOp,
+                processControllerProvider: FakeProcessControllerProvider(),
                 temporaryFolder: self.tempFolder,
                 uniqueIdentifierGenerator: self.uniqueIdentifierGenerator
             )

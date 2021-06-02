@@ -4,6 +4,7 @@ import Foundation
 import QueueModels
 import RunnerModels
 import LoggingSetup
+import MetricsExtensions
 import SimulatorPoolModels
 import SimulatorPoolTestHelpers
 import TestArgFile
@@ -25,7 +26,7 @@ final class TestArgFileValidatorTests: XCTestCase {
                     simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
                     simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
                     testDestination: TestDestinationFixtures.testDestination,
-                    testRunnerTool: .xcodebuild(nil),
+                    testRunnerTool: .xcodebuild,
                     testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
                     testType: .appTest,
                     testsToRun: [],
@@ -53,7 +54,7 @@ final class TestArgFileValidatorTests: XCTestCase {
                     simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
                     simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
                     testDestination: TestDestinationFixtures.testDestination,
-                    testRunnerTool: .xcodebuild(nil),
+                    testRunnerTool: .xcodebuild,
                     testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
                     testType: .appTest,
                     testsToRun: [],
@@ -81,7 +82,7 @@ final class TestArgFileValidatorTests: XCTestCase {
                     simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
                     simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
                     testDestination: TestDestinationFixtures.testDestination,
-                    testRunnerTool: .xcodebuild(nil),
+                    testRunnerTool: .xcodebuild,
                     testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
                     testType: .appTest,
                     testsToRun: [],
@@ -109,7 +110,7 @@ final class TestArgFileValidatorTests: XCTestCase {
                     simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
                     simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
                     testDestination: TestDestinationFixtures.testDestination,
-                    testRunnerTool: .xcodebuild(nil),
+                    testRunnerTool: .xcodebuild,
                     testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
                     testType: .uiTest,
                     testsToRun: [],
@@ -137,7 +138,7 @@ final class TestArgFileValidatorTests: XCTestCase {
                     simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
                     simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
                     testDestination: TestDestinationFixtures.testDestination,
-                    testRunnerTool: .xcodebuild(nil),
+                    testRunnerTool: .xcodebuild,
                     testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
                     testType: .uiTest,
                     testsToRun: [],
@@ -153,18 +154,13 @@ final class TestArgFileValidatorTests: XCTestCase {
     
     private func createTestArgFile(entries: [TestArgFileEntry]) -> TestArgFile {
         TestArgFile(
-            analyticsConfiguration: AnalyticsConfiguration(
-                graphiteConfiguration: nil,
-                statsdConfiguration: nil,
-                sentryConfiguration: nil
-            ),
             entries: entries,
             prioritizedJob: PrioritizedJob(
+                analyticsConfiguration: AnalyticsConfiguration(),
                 jobGroupId: "",
                 jobGroupPriority: 0,
                 jobId: "",
-                jobPriority: 0,
-                persistentMetricsJobId: ""
+                jobPriority: 0
             ),
             testDestinationConfigurations: []
         )

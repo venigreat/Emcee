@@ -1,8 +1,9 @@
 import Deployer
+import EmceeLogging
 import Foundation
 import ProcessController
 import SSHDeployer
-import TemporaryStuff
+import Tmp
 import UniqueIdentifierGenerator
 
 /// Class for generic usage: it deploys the provided deployable items to the provided deployment destinations, and
@@ -13,6 +14,7 @@ final class DistDeployer {
     private let deploymentDestination: DeploymentDestination
     private let deployableItems: [DeployableItem]
     private let deployableCommands: [DeployableCommand]
+    private let logger: ContextualLogger
     private let processControllerProvider: ProcessControllerProvider
     private let tempFolder: TemporaryFolder
     private let uniqueIdentifierGenerator: UniqueIdentifierGenerator
@@ -22,6 +24,7 @@ final class DistDeployer {
         deploymentDestination: DeploymentDestination,
         deployableItems: [DeployableItem],
         deployableCommands: [DeployableCommand],
+        logger: ContextualLogger,
         processControllerProvider: ProcessControllerProvider,
         tempFolder: TemporaryFolder,
         uniqueIdentifierGenerator: UniqueIdentifierGenerator
@@ -30,6 +33,7 @@ final class DistDeployer {
         self.deploymentDestination = deploymentDestination
         self.deployableItems = deployableItems
         self.deployableCommands = deployableCommands
+        self.logger = logger
         self.processControllerProvider = processControllerProvider
         self.tempFolder = tempFolder
         self.uniqueIdentifierGenerator = uniqueIdentifierGenerator
@@ -42,6 +46,7 @@ final class DistDeployer {
             deployables: deployableItems,
             deployableCommands: deployableCommands,
             destination: deploymentDestination,
+            logger: logger,
             processControllerProvider: processControllerProvider,
             temporaryFolder: tempFolder,
             uniqueIdentifierGenerator: uniqueIdentifierGenerator

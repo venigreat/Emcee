@@ -1,6 +1,7 @@
 import BuildArtifacts
 import BuildArtifactsTestHelpers
 import Foundation
+import MetricsExtensions
 import QueueModels
 import RunnerModels
 import RunnerTestHelpers
@@ -15,21 +16,21 @@ public final class BucketFixtures {
         workerCapabilityRequirements: Set<WorkerCapabilityRequirement> = []
     ) -> Bucket {
         return Bucket(
+            analyticsConfiguration: AnalyticsConfiguration(),
             bucketId: bucketId,
             buildArtifacts: BuildArtifactsFixtures.fakeEmptyBuildArtifacts(),
             developerDir: .current,
             pluginLocations: [],
-            simulatorControlTool: SimulatorControlToolFixtures.fakeFbsimctlTool,
+            simulatorControlTool: SimulatorControlToolFixtures.simctlTool,
             simulatorOperationTimeouts: SimulatorOperationTimeoutsFixture().simulatorOperationTimeouts(),
             simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
             testDestination: TestDestinationFixtures.testDestination,
             testEntries: testEntries,
             testExecutionBehavior: TestExecutionBehavior(environment: [:], numberOfRetries: numberOfRetries),
-            testRunnerTool: TestRunnerToolFixtures.fakeFbxctestTool,
+            testRunnerTool: .xcodebuild,
             testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
             testType: TestType.uiTest,
-            workerCapabilityRequirements: workerCapabilityRequirements,
-            persistentMetricsJobId: ""
+            workerCapabilityRequirements: workerCapabilityRequirements
         )
     }
 }

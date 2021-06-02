@@ -5,7 +5,8 @@ import DeveloperDirLocator
 import DeveloperDirLocatorTestHelpers
 import FileCache
 import Foundation
-import Logging
+import EmceeLogging
+import MetricsExtensions
 import PathLib
 import ProcessController
 import ProcessControllerTestHelpers
@@ -15,7 +16,7 @@ import ResourceLocationResolverTestHelpers
 import RunnerModels
 import RunnerTestHelpers
 import SimulatorPoolTestHelpers
-import TemporaryStuff
+import Tmp
 import TestHelpers
 import URLResource
 import UniqueIdentifierGenerator
@@ -81,7 +82,7 @@ final class ExecutableTestDiscovererTests: XCTestCase {
         }
         
         XCTAssertEqual(
-            subprocesses[0].environment["DEVELOPER_DIR"],
+            subprocesses[0].environment.values["DEVELOPER_DIR"],
             "/path/to/developer_dir"
         )
     }
@@ -100,21 +101,21 @@ final class ExecutableTestDiscovererTests: XCTestCase {
         }
         
         XCTAssertEqual(
-            subprocesses[1].environment["SIMULATOR_ROOT"],
+            subprocesses[1].environment.values["SIMULATOR_ROOT"],
             "/path/to/iOS 12.0.simruntime/Contents/Resources/RuntimeRoot"
         )
         XCTAssertEqual(
-            subprocesses[1].environment["DYLD_ROOT_PATH"],
+            subprocesses[1].environment.values["DYLD_ROOT_PATH"],
             "/path/to/iOS 12.0.simruntime/Contents/Resources/RuntimeRoot"
         )
         XCTAssert(
-            subprocesses[1].environment["SIMULATOR_SHARED_RESOURCES_DIRECTORY"]?.isEmpty == false
+            subprocesses[1].environment.values["SIMULATOR_SHARED_RESOURCES_DIRECTORY"]?.isEmpty == false
         )
         XCTAssert(
-            subprocesses[1].environment["EMCEE_RUNTIME_TESTS_EXPORT_PATH"]?.isEmpty == false
+            subprocesses[1].environment.values["EMCEE_RUNTIME_TESTS_EXPORT_PATH"]?.isEmpty == false
         )
         XCTAssertEqual(
-            subprocesses[1].environment["EMCEE_XCTEST_BUNDLE_PATH"],
+            subprocesses[1].environment.values["EMCEE_XCTEST_BUNDLE_PATH"],
             "/path/to/bundle.xctest"
         )
     }
@@ -173,28 +174,31 @@ final class ExecutableTestDiscovererTests: XCTestCase {
             resourceLocationResolver: FakeResourceLocationResolver.resolvingTo(
                 path: AbsolutePath(testBundleLocation.resourceLocation.stringValue)
             ),
-            processControllerProvider: FakeProcessControllerProvider(tempFolder: tempFolder, creator: { subprocess in
+            processControllerProvider: FakeProcessControllerProvider { subprocess in
                 onSubprocessCreate?(subprocess)
                 
                 let arguments = try subprocess.arguments.map { try $0.stringValue() }
-                if arguments.contains("simctl") {
-                    try simctlResponse.write(
-                        to: subprocess.standardStreamsCaptureConfig.stdoutOutputPath().fileUrl,
-                        atomically: true,
-                        encoding: .utf8
-                    )
-                } else if let outputPath = subprocess.environment["EMCEE_RUNTIME_TESTS_EXPORT_PATH"] {
-                    try executableResponse.write(
-                        to: AbsolutePath(outputPath).fileUrl,
-                        atomically: true,
-                        encoding: .utf8
-                    )
-                }
                 
                 let processController = FakeProcessController(subprocess: subprocess)
-                processController.overridedProcessStatus = .terminated(exitCode: 0)
+                
+                processController.onStart { _, unsubscribe in
+                    if arguments.contains("simctl") {
+                        processController.broadcastStdout(data: Data(simctlResponse.utf8))
+                    } else if let outputPath = subprocess.environment.values["EMCEE_RUNTIME_TESTS_EXPORT_PATH"] {
+                        self.assertDoesNotThrow {
+                            try executableResponse.write(
+                                to: AbsolutePath(outputPath).fileUrl,
+                                atomically: true,
+                                encoding: .utf8
+                            )
+                        }
+                    }
+                    processController.overridedProcessStatus = .terminated(exitCode: 0)
+                    unsubscribe()
+                }
+                
                 return processController
-            }),
+            },
             tempFolder: tempFolder,
             uniqueIdentifierGenerator: UuidBasedUniqueIdentifierGenerator()
         )
@@ -211,6 +215,7 @@ final class ExecutableTestDiscovererTests: XCTestCase {
         )
     )
     private lazy var configuration = TestDiscoveryConfiguration(
+        analyticsConfiguration: AnalyticsConfiguration(),
         developerDir: .current,
         pluginLocations: [],
         testDiscoveryMode: .runtimeExecutableLaunch(appBundleLocation),
@@ -218,12 +223,12 @@ final class ExecutableTestDiscovererTests: XCTestCase {
         simulatorSettings: SimulatorSettingsFixtures().simulatorSettings(),
         testDestination: TestDestinationFixtures.testDestination,
         testExecutionBehavior: TestExecutionBehaviorFixtures().build(),
-        testRunnerTool: .xcodebuild(nil),
+        testRunnerTool: .xcodebuild,
         testTimeoutConfiguration: TestTimeoutConfiguration(singleTestMaximumDuration: 0, testRunnerMaximumSilenceDuration: 0),
         testsToValidate: [],
         xcTestBundleLocation: testBundleLocation,
-        persistentMetricsJobId: "",
-        remoteCache: NoOpRuntimeDumpRemoteCache()
+        remoteCache: NoOpRuntimeDumpRemoteCache(),
+        logger: .noOp
     )
     private lazy var tempFolder = assertDoesNotThrow { try TemporaryFolder() }
 }

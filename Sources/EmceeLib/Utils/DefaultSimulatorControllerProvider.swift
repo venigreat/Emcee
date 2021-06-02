@@ -1,28 +1,31 @@
 import AppleTools
 import DeveloperDirLocator
 import DeveloperDirModels
+import EmceeLogging
 import Foundation
 import PathLib
 import RunnerModels
 import SimulatorPool
 import SimulatorPoolModels
-import TemporaryStuff
-import fbxctest
+import Tmp
 
 public final class DefaultSimulatorControllerProvider: SimulatorControllerProvider {
     private let additionalBootAttempts: UInt
     private let developerDirLocator: DeveloperDirLocator
+    private let logger: ContextualLogger
     private let simulatorBootQueue: DispatchQueue
     private let simulatorStateMachineActionExecutorProvider: SimulatorStateMachineActionExecutorProvider
     
     public init(
         additionalBootAttempts: UInt,
         developerDirLocator: DeveloperDirLocator,
+        logger: ContextualLogger,
         simulatorBootQueue: DispatchQueue,
         simulatorStateMachineActionExecutorProvider: SimulatorStateMachineActionExecutorProvider
     ) {
         self.additionalBootAttempts = additionalBootAttempts
         self.developerDirLocator = developerDirLocator
+        self.logger = logger
         self.simulatorBootQueue = simulatorBootQueue
         self.simulatorStateMachineActionExecutorProvider = simulatorStateMachineActionExecutorProvider
     }
@@ -42,13 +45,15 @@ public final class DefaultSimulatorControllerProvider: SimulatorControllerProvid
                 coreSimulatorStateProvider: DefaultCoreSimulatorStateProvider(),
                 developerDir: developerDir,
                 developerDirLocator: developerDirLocator,
+                logger: logger,
                 simulatorStateMachine: SimulatorStateMachine(),
                 simulatorStateMachineActionExecutor: try simulatorStateMachineActionExecutorProvider.simulatorStateMachineActionExecutor(
                     simulatorControlTool: simulatorControlTool
                 ),
                 temporaryFolder: temporaryFolder,
                 testDestination: testDestination
-            )
+            ),
+            logger: logger
         )
     }
 }
