@@ -52,6 +52,7 @@ public final class RunnerTests: XCTestCase {
     }
 
     func test___running_test_with_successful_result___provides_successful_results() throws {
+        testRunnerProvider.predefinedFakeTestRunner.absolutePath = "path"
         let runnerResults = try runTestEntries([testEntry])
 
         guard runnerResults.testEntryResults.count == 1, let testResult = runnerResults.testEntryResults.first else {
@@ -412,6 +413,13 @@ public final class RunnerTests: XCTestCase {
                 ]
             }
         }
+    }
+    
+    func test___additional_environment_from_runner_sends_to_test_context() throws {
+        testRunnerProvider.predefinedFakeTestRunner.additionalEnvironmentReturns = ["key": "value"]
+        let _ = try runTestEntries([testEntry])
+
+        XCTAssertEqual(testRunnerProvider.predefinedFakeTestRunner.testContext?.environment["key"], "value")
     }
     
     private func expectationForDidRunEvent() -> XCTestExpectation {

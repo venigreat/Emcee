@@ -7,18 +7,27 @@ public final class DefaultSSHClient: SSHClient {
     private let host: String
     private let port: Int32
     private let username: String
-    private let key: String
+    private let password: String?
+    private let key: String?
     
-    public init(host: String, port: Int32, username: String, key: String) throws {
+    public init(host: String, port: Int32, username: String, password: String?, key: String?) throws {
         self.host = host
         self.port = port
         self.username = username
+        self.password = password
         self.key = key
         self.ssh = try SSH(host: host, port: port)
     }
 
     public func connectAndAuthenticate() throws {
-        try ssh.authenticate(username: username, privateKey: key)
+        if let password = password {
+            try ssh.authenticate(username: username, password: password)
+        } else if let key = key {
+            try ssh.authenticate(username: username, privateKey: key)
+        } else {
+            fatalError("Connection to \(host) has no password or privateKey")
+        }
+        
     }
     
     @discardableResult

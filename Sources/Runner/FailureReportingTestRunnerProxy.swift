@@ -6,6 +6,7 @@ import SimulatorPoolModels
 import Tmp
 import RunnerModels
 import Foundation
+import PathLib
 
 public final class FailureReportingTestRunnerProxy: TestRunner {
     private let dateProvider: DateProvider
@@ -51,6 +52,10 @@ public final class FailureReportingTestRunnerProxy: TestRunner {
                 testRunnerStream: testRunnerStream
             )
         }
+    }
+    
+    public func additionalEnvironment(absolutePath: AbsolutePath) -> [String: String] {
+        return testRunner.additionalEnvironment(absolutePath: absolutePath)
     }
     
     private func generateFailureResults(
